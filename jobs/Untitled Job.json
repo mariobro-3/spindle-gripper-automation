@@ -1,0 +1,210 @@
+{
+  "version": 1,
+  "name": "Untitled Job",
+  "machineId": "vf9ss",
+  "machines": [
+    {
+      "id": "vf9ss",
+      "label": "VF-9SS (NGC, 6-port air)",
+      "control": "ngc",
+      "mcodes": {
+        "gripperClose": "M55",
+        "gripperOpen": "M65",
+        "vise1Close": "M62",
+        "vise1Open": "M52",
+        "vise2Close": "M63",
+        "vise2Open": "M53",
+        "flipCW": "M64",
+        "flipCCW": "M54",
+        "flipGripMode": "shared-vise1",
+        "flipGripClose": "M66",
+        "flipGripOpen": "M56"
+      },
+      "gripperTool": 17,
+      "gripperH": 17,
+      "chipFanTool": 1,
+      "chipFanH": 1,
+      "positionFeed": 400,
+      "approachFeed": 250,
+      "insertFeed": 20
+    },
+    {
+      "id": "vf3ss",
+      "label": "VF-3SS (Pre-NGC)",
+      "control": "pre-ngc",
+      "mcodes": {
+        "gripperClose": "M55",
+        "gripperOpen": "M65",
+        "vise1Close": "M62",
+        "vise1Open": "M52",
+        "vise2Close": "M63",
+        "vise2Open": "M53",
+        "flipCW": "M64",
+        "flipCCW": "M54",
+        "flipGripMode": "shared-vise1",
+        "flipGripClose": "M66",
+        "flipGripOpen": "M56"
+      },
+      "gripperTool": 17,
+      "gripperH": 17,
+      "chipFanTool": 1,
+      "chipFanH": 1,
+      "positionFeed": 400,
+      "approachFeed": 250,
+      "insertFeed": 20
+    },
+    {
+      "id": "vf4ss",
+      "label": "VF-4SS (Pre-NGC)",
+      "control": "pre-ngc",
+      "mcodes": {
+        "gripperClose": "M55",
+        "gripperOpen": "M65",
+        "vise1Close": "M62",
+        "vise1Open": "M52",
+        "vise2Close": "M63",
+        "vise2Open": "M53",
+        "flipCW": "M64",
+        "flipCCW": "M54",
+        "flipGripMode": "shared-vise1",
+        "flipGripClose": "M66",
+        "flipGripOpen": "M56"
+      },
+      "gripperTool": 17,
+      "gripperH": 17,
+      "chipFanTool": 1,
+      "chipFanH": 1,
+      "positionFeed": 400,
+      "approachFeed": 250,
+      "insertFeed": 20
+    }
+  ],
+  "fixture": {
+    "plateLength": 18,
+    "plateWidth": 8,
+    "plateThickness": 0.75,
+    "vise1X": 3,
+    "vise1Y": 4,
+    "vise2X": 15,
+    "vise2Y": 4,
+    "flipperX": 9,
+    "flipperY": 4,
+    "models": {
+      "vise": {
+        "rotX": 0,
+        "rotY": 0,
+        "rotZ": 0,
+        "offX": 0,
+        "offY": 0,
+        "offZ": 0,
+        "units": "mm",
+        "visible": true
+      },
+      "flipper": {
+        "rotX": 0,
+        "rotY": 0,
+        "rotZ": 0,
+        "offX": 0,
+        "offY": 0,
+        "offZ": 0,
+        "units": "mm",
+        "visible": true
+      },
+      "gripper": {
+        "rotX": 0,
+        "rotY": 0,
+        "rotZ": 0,
+        "offX": 0,
+        "offY": 0,
+        "offZ": 0,
+        "units": "mm",
+        "visible": false
+      }
+    }
+  },
+  "datum": {
+    "ref": "front-left",
+    "machineX": -20,
+    "machineY": -12,
+    "zValues": {
+      "vise1": -18,
+      "tray": -20,
+      "vise2": -18,
+      "flipper": -16,
+      "finished": -20
+    }
+  },
+  "wcs": {
+    "vise1": "G54",
+    "tray": "G55",
+    "vise2": "G56",
+    "flipper": "G57",
+    "finished": "G58"
+  },
+  "stock": {
+    "length": 2,
+    "width": 2,
+    "height": 1
+  },
+  "stockTray": {
+    "firstPocketX": -35,
+    "firstPocketY": -10,
+    "countX": 4,
+    "countY": 3,
+    "pitchX": 2.5,
+    "pitchY": 2.5
+  },
+  "finished": {
+    "mode": "bin",
+    "bin": {
+      "x": -35,
+      "y": -3,
+      "length": 6,
+      "width": 6,
+      "height": 4,
+      "dropZ": 1
+    },
+    "tray": {
+      "firstPocketX": -35,
+      "firstPocketY": -2,
+      "countX": 4,
+      "countY": 3,
+      "pitchX": 2.5,
+      "pitchY": 2.5
+    }
+  },
+  "trayGen": {
+    "pocketClearance": 0.01,
+    "pocketDepth": 0.375,
+    "thickness": 0.5,
+    "margin": 0.5,
+    "cornerRadius": 0.125,
+    "outerCornerRadius": 0.25,
+    "mountHoles": true,
+    "mountHoleDia": 0.257,
+    "mountHoleInset": 0.3
+  },
+  "templates": {
+    "beginning": "({PROG_COMMENT})\n(TWO-OP SPINDLE GRIPPER AUTOMATION - {MACHINE})\n(GENERATED {DATE} BY SPINDLE GRIPPER AUTOMATION APP)\nG90 G94 G17 G20; (absolute, feed per min, xy plane, inch)\nM31; (chip auger on)\nG53 G0 Z0.; (move z to machine home)",
+    "loadVise1": "N200; (LOAD VISE 1 - TRAY RETRIEVAL AND VISE DEPOSIT)\nG90 G94 G17 G20; (settings)\nT{GRIP_TOOL} M6; (get gripper)\nG43 H{GRIP_H}; (activate gripper height offset)\n{WCS_TRAY}; (tray work offset - xy set by pocket position macro)\nG1 Z1.0 F{F_APPR}; (lower to z1.0 above tray z0)\nG1 Z0. F{F_INS}; (lower onto stock in pocket)\n{GRIP_CLOSE}; (close gripper)\nG04 P1.0; (wait one second)\nG1 Z1. F{F_INS}; (raise part to z1)\nG53 G1 Z0. F{F_POS}; (raise part to machine z0)\n{V1_OPEN}; (open vise 1 - opens flipper grip too if teed)\n{WCS_V1}; (vise 1 work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over vise 1)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z-0.01 F{F_INS}; (seat stock in vise)\nG04 P0.2; (wait)\n{V1_CLOSE}; (close vise 1)\nG04 P2.0; (wait for vise to close)\n{GRIP_OPEN}; (open gripper)\nG04 P0.2; (wait)\nG1 Z1. F{F_INS}; (move to z1)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "chipClear": "N201; (CHIP CLEARING)\nG90 G94 G17 G20; (settings)\nG53 G0 Z0.; (move z to machine home)\nT{FAN_TOOL} M6; (change to chip fan)\nG43 H{FAN_H}; (chip fan height offset)\nS500 M3; (start spindle slow)\nG04 P2.0; (wait)\nS2000 M3; (ramp up speed)\nG04 P2.0; (wait)\nS5000 M3; (full speed)\nG53 G0 X-30. Y-15.;\nG53 G0 Z-3.00; (lower chip fan)\nG53 G0 X-5.;\nG53 G0 Y-5.;\nG53 G0 X-30.;\nG53 G0 Z0.; (raise chip fan)\nS1000 M3; (slow down)\nG04 P2.0; (wait)\nM5; (spindle off)\nM99; (return to main program)",
+    "unloadVise1": "N202; (UNLOAD VISE 1 - GRAB OP1 PART)\nG90 G94 G17 G20; (settings)\nT{GRIP_TOOL} M6; (get gripper)\nG43 H{GRIP_H}; (activate gripper height offset)\n{WCS_V1}; (vise 1 work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over vise 1)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z{FACE_Z} F{F_INS}; (grip height - compensated for op1 facing)\nG04 P0.2; (wait)\n{GRIP_CLOSE}; (close gripper)\n{V1_OPEN}; (open vise 1 - opens flipper grip too if teed)\nG04 P2.0; (wait)\nG1 Z1. F{F_INS}; (raise part)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "loadFlipper": "N204; (LOAD FLIPPER AND CLOSE FLIPPER GRIP)\nG90 G94 G17 G20; (settings)\n{WCS_FLIP}; (flipper work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over flipper nest)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z{FACE_Z} F{F_INS}; (place part in flipper)\nG04 P0.2; (wait)\n{FGRIP_CLOSE}; (close flipper grip)\nG04 P1.0; (wait)\n{GRIP_OPEN}; (release gripper)\nG04 P0.2; (wait)\nG1 Z1. F{F_INS}; (raise clear)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "flipCCW": "N205; (ROTATE FLIPPER CCW - FLIP PART)\n{FLIP_CCW}; (rotate flipper ccw)\nG04 P2.5; (wait for rotation to complete)\nM99; (return to main program)",
+    "unloadVise2": "N206; (UNLOAD VISE 2 - GRAB FINISHED PART)\nG90 G94 G17 G20; (settings)\nT{GRIP_TOOL} M6; (get gripper)\nG43 H{GRIP_H}; (activate gripper height offset)\n{WCS_V2}; (vise 2 work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over vise 2)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z0. F{F_INS}; (grip height)\nG04 P0.2; (wait)\n{GRIP_CLOSE}; (close gripper)\n{V2_OPEN}; (open vise 2)\nG04 P2.0; (wait)\nG1 Z1. F{F_INS}; (raise part)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "depositFinished": "N203; (DEPOSIT FINISHED PART - XY SET BY POSITION MACRO)\nG1 Z{DROP_Z} F{F_APPR}; (lower to drop height)\n{GRIP_OPEN}; (release part)\nG04 P1.0; (wait)\nG53 G0 Z0.; (raise to machine z0)\nM99; (return to main program)",
+    "unloadFlipper": "N207; (UNLOAD FLIPPER - GRAB FLIPPED PART)\nG90 G94 G17 G20; (settings)\n{WCS_FLIP}; (flipper work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over flipper nest)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z0. F{F_INS}; (lower to part)\nG04 P0.2; (wait)\n{GRIP_CLOSE}; (grab part with gripper)\nG04 P0.5; (wait)\n{FGRIP_OPEN}; (open flipper grip - opens vise 1 too if teed)\nG04 P0.5; (wait)\nG1 Z1. F{F_INS}; (raise part clear of flipper)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "loadVise2": "N208; (LOAD VISE 2)\nG90 G94 G17 G20; (settings)\n{V2_OPEN}; (open vise 2)\n{WCS_V2}; (vise 2 work offset)\nG1 X0. Y0. F{F_POS}; (center gripper over vise 2)\nG1 Z2. F{F_APPR}; (move to z2)\nG1 Z1. F100.; (move to z1)\nG1 Z-0.01 F{F_INS}; (seat part in vise)\nG04 P0.2; (wait)\n{V2_CLOSE}; (close vise 2)\nG04 P2.0; (wait for vise to close)\n{GRIP_OPEN}; (open gripper)\nG04 P0.2; (wait)\nG1 Z1. F{F_INS}; (raise clear)\nG0 G53 Z0.; (rapid to machine z0)\nM99; (return to main program)",
+    "flipCW": "N209; (ROTATE FLIPPER BACK CW)\n{FLIP_CW}; (rotate flipper cw to home)\nG04 P2.5; (wait for rotation to complete)\n{V1_CLOSE}; (re-clamp vise 1 - shared air line with flipper grip)\nG04 P1.0; (wait for clamp)\nM99; (return to main program)",
+    "ending": "G53 G0 Z0.; (go to z home)\nM5; (spindle off)\nM9; (coolant off)\nM33; (chip auger off)\nG53 G0 X0. Y0.; (go to machine home)\nM30; (end program)"
+  },
+  "op1Code": "%\nO00123 (OP1 PART)\nN10 G90 G94 G17 G20\nT5 M6 (1/2 EM)\nG43 H5\nS8000 M3\nG54 G0 X0. Y0.\nG0 Z1.\nG1 Z-0.1 F30.\nG1 X1. F60.\nG28 G91 Z0.\nM30\n%",
+  "op2Code": "(OP2 SIDE)\nT7 M6 (CHAMFER)\nG43 H7\nS10000 M3\nG56 G0 X0. Y0.\nG0 Z1.\nG1 Z-0.05 F20.\nG1 X-1. F50.\nM30",
+  "options": {
+    "programNumber": "O01000",
+    "programComment": "TWO OP GRIPPER JOB",
+    "useChipClear": true,
+    "includeG10": false,
+    "faceRemovalOp1": 0
+  }
+}

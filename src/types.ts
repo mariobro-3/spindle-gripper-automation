@@ -1,0 +1,173 @@
+export type WcsCode = "G54" | "G55" | "G56" | "G57" | "G58" | "G59";
+
+export type StationKey = "vise1" | "tray" | "vise2" | "flipper" | "finished";
+
+export interface McodeMap {
+  gripperClose: string;
+  gripperOpen: string;
+  vise1Close: string;
+  vise1Open: string;
+  vise2Close: string;
+  vise2Open: string;
+  flipCW: string;
+  flipCCW: string;
+  /** "shared-vise1" = flipper grip is teed to the vise 1 air lines */
+  flipGripMode: "shared-vise1" | "dedicated";
+  flipGripClose: string;
+  flipGripOpen: string;
+}
+
+export interface MachineProfile {
+  id: string;
+  label: string;
+  /** "ngc", "pre-ngc", or a custom control name entered via Other */
+  control: string;
+  mcodes: McodeMap;
+  gripperTool: number;
+  gripperH: number;
+  chipFanTool: number;
+  chipFanH: number;
+  /** run the Haas chip fan table wash (N210) before the gripper grabs parts */
+  chipFanEnabled: boolean;
+  /** machine bed / table drawn from machine zero into negative X (inches) */
+  bedLength: number;
+  /** machine bed / table drawn from machine zero into negative Y (inches) */
+  bedWidth: number;
+  /** T-slot opening width (inches). Haas 16mm slots ≈ 0.63 */
+  tSlotWidth: number;
+  /** T-slot center-to-center spacing along Y (inches) */
+  tSlotSpacing: number;
+  /** number of T-slots, centered on the bed width; 0 = none */
+  tSlotCount: number;
+  positionFeed: number;
+  approachFeed: number;
+  insertFeed: number;
+}
+
+/** Alignment tweaks applied to an imported STEP model in the viewer */
+export interface ModelAlignment {
+  rotX: number; // degrees
+  rotY: number;
+  rotZ: number;
+  offX: number; // inches, applied after auto bottom-center placement
+  offY: number;
+  offZ: number;
+  visible: boolean;
+}
+
+export interface FixtureConfig {
+  plateLength: number; // X, 18
+  plateWidth: number; // Y, 8
+  plateThickness: number; // 0.75
+  vise1X: number; // station centers in plate-local coords (origin = front-left corner of plate)
+  vise1Y: number;
+  vise2X: number;
+  vise2Y: number;
+  flipperX: number;
+  flipperY: number;
+  /** native units the STEP files were modeled in - applies to all imported models */
+  stepUnits: "mm" | "inch";
+  models: {
+    vise: ModelAlignment;
+    flipper: ModelAlignment;
+    gripper: ModelAlignment;
+  };
+}
+
+export type DatumRef = "front-left" | "front-right" | "back-left" | "back-right" | "center";
+
+export interface DatumConfig {
+  ref: DatumRef;
+  machineX: number; // machine coordinate of the probed datum point
+  machineY: number;
+  /** whole-fixture orientation on the bed: degrees CCW about the datum point */
+  rotation: number;
+  /** per-station Z values (machine coords) recorded for the offset sheet / G10 output */
+  zValues: Record<StationKey, number>;
+}
+
+export interface StockConfig {
+  length: number; // along machine X
+  width: number; // along machine Y
+  height: number;
+}
+
+export interface TrayConfig {
+  /** machine coordinates of the FIRST pocket center (bottom-left pocket, per Gimbel) */
+  firstPocketX: number;
+  firstPocketY: number;
+  countX: number;
+  countY: number;
+  pitchX: number;
+  pitchY: number;
+}
+
+export interface BinConfig {
+  x: number; // machine coordinate of the drop point (bin center)
+  y: number;
+  length: number;
+  width: number;
+  height: number;
+  dropZ: number; // drop height above the finished WCS Z0, in the finished WCS
+}
+
+export interface FinishedConfig {
+  mode: "bin" | "tray";
+  bin: BinConfig;
+  tray: TrayConfig;
+}
+
+export interface TrayGenConfig {
+  pocketClearance: number; // added around stock on each side
+  pocketDepth: number;
+  thickness: number;
+  margin: number; // material around outer pockets
+  cornerRadius: number; // pocket corner radius
+  outerCornerRadius: number;
+  mountHoles: boolean;
+  /** corners = 4 corner holes; t-slots = holes where the tray overlaps machine T-slots */
+  mountHoleMode: "corners" | "t-slots";
+  mountHoleDia: number;
+  mountHoleInset: number;
+}
+
+export type TemplateKey =
+  | "beginning"
+  | "loadVise1"
+  | "chipClear"
+  | "chipFan"
+  | "unloadVise1"
+  | "depositFinished"
+  | "loadFlipper"
+  | "flipCCW"
+  | "unloadVise2"
+  | "unloadFlipper"
+  | "loadVise2"
+  | "flipCW"
+  | "ending";
+
+export interface ProgramOptions {
+  programNumber: string;
+  programComment: string;
+  useChipClear: boolean;
+  includeG10: boolean;
+  faceRemovalOp1: number; // material faced off in op1, lowers regrip Z
+}
+
+export interface JobConfig {
+  version: number;
+  name: string;
+  machineId: string;
+  machines: MachineProfile[];
+  fixture: FixtureConfig;
+  datum: DatumConfig;
+  wcs: Record<StationKey, WcsCode>;
+  stock: StockConfig;
+  stockTray: TrayConfig;
+  finished: FinishedConfig;
+  trayGen: TrayGenConfig;
+  templates: Record<TemplateKey, string>;
+  op1Code: string;
+  op2Code: string;
+  options: ProgramOptions;
+}
