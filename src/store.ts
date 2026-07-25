@@ -43,6 +43,10 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
     m.tSlotWidth ??= d?.tSlotWidth ?? 0.63;
     m.tSlotSpacing ??= d?.tSlotSpacing ?? 3.15;
     m.tSlotCount ??= d?.tSlotCount ?? 5;
+    // v7 -> v8: optional second gripper for the op2 side
+    m.gripper2Enabled ??= false;
+    m.gripper2Tool ??= m.gripperTool;
+    m.gripper2H ??= m.gripperH;
   }
   // v6 -> v7: tray mount holes can auto-align to T-slots
   merged.trayGen.mountHoleMode ??= "t-slots";
@@ -57,6 +61,12 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
       m.tSlotSpacing = d.tSlotSpacing;
       m.tSlotCount = d.tSlotCount;
     }
+  }
+  // v7 -> v8: templates gained {ORIENT_*} and {GRIP2_*} tokens - refresh
+  // stored templates so the new features work (custom edits are replaced;
+  // the Program Builder warns if a needed token is missing afterwards)
+  if ((loaded.version ?? 1) < 8) {
+    merged.templates = { ...defaultTemplates };
   }
   merged.version = JOB_VERSION;
   return merged;

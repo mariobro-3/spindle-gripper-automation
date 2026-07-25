@@ -1,7 +1,9 @@
+import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import { Viewer } from "../viewer/Viewer";
 import { NumField, Section, SelectField, CheckField } from "../ui";
-import type { ModelAlignment } from "../types";
+import { listCadFiles, uploadCadFile } from "../api";
+import type { ModelAlignment, ModelKey } from "../types";
 
 function AlignmentFields({
   align,
@@ -23,10 +25,63 @@ function AlignmentFields({
   );
 }
 
+function ModelFileField({
+  align,
+  cadFiles,
+  autoLabel,
+  onChange,
+}: {
+  align: ModelAlignment;
+  cadFiles: string[];
+  /** label for the empty choice: "Auto (built-in)" for the standard slots, "None" for jaws */
+  autoLabel: string;
+  onChange: (file: string | undefined) => void;
+}) {
+  const current = align.file ?? "";
+  // keep a stale selection visible even if the file disappeared from the library
+  const options = [
+    { value: "", label: autoLabel },
+    ...cadFiles.map((f) => ({ value: f, label: f })),
+    ...(current && !cadFiles.includes(current) ? [{ value: current, label: `${current} (missing)` }] : []),
+  ];
+  return (
+    <SelectField
+      label="STEP file"
+      value={current}
+      options={options}
+      onChange={(v) => onChange(v || undefined)}
+    />
+  );
+}
+
 export function FixtureTab() {
   const fixture = useApp((s) => s.job.fixture);
   const datum = useApp((s) => s.job.datum);
   const update = useApp((s) => s.update);
+
+  const [cadFiles, setCadFiles] = useState<string[]>([]);
+  const [uploadMsg, setUploadMsg] = useState("");
+  const uploadRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    listCadFiles().then(setCadFiles).catch(() => {});
+  }, []);
+
+  const modelFile = (key: ModelKey) => (file: string | undefined) =>
+    update((j) => {
+      j.fixture.models[key].file = file;
+      if (file) j.fixture.models[key].visible = true;
+    });
+
+  const onUpload = async (f: File) => {
+    try {
+      const rel = await uploadCadFile(f.name, await f.arrayBuffer());
+      setCadFiles(await listCadFiles());
+      setUploadMsg(`Uploaded ${rel} - pick it in a STEP file selector below.`);
+    } catch {
+      setUploadMsg("Upload failed.");
+    }
+  };
 
   return (
     <div className="split">
@@ -88,19 +143,50 @@ export function FixtureTab() {
             ]}
             onChange={(v) => update((j) => (j.fixture.stepUnits = v))}
           />
+          <div className="btnrow">
+            <button className="btn" onClick={() => uploadRef.current?.click()}>
+              Add STEP file...
+            </button>
+            <input
+              ref={uploadRef}
+              type="file"
+              accept=".step,.stp"
+              style={{ display: "none" }}
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void onUpload(f);
+                e.target.value = "";
+              }}
+            />
+            {uploadMsg && <span className="hint">{uploadMsg}</span>}
+          </div>
           <p className="hint">
-            Applies to all imported models together. Everything else in the app (plate, spacings, trays,
-            offsets, G-code) is always in inches.
+            Upload your own STEP files (your vises, soft jaws, etc.) into the CAD library, then pick them in
+            the model sections below. Units apply to all imported models together; everything else in the app
+            (plate, spacings, trays, offsets, G-code) is always in inches.
           </p>
         </Section>
         <Section title="Model Alignment - Air Vise" defaultOpen={false}>
+          <ModelFileField align={fixture.models.vise} cadFiles={cadFiles} autoLabel="Auto (bundled Gimbel vise)" onChange={modelFile("vise")} />
           <AlignmentFields align={fixture.models.vise} onChange={(mut) => update((j) => mut(j.fixture.models.vise))} />
         </Section>
+        <Section title="Soft Jaws - Vise 1" defaultOpen={false}>
+          <p className="hint">Optional: your own soft jaw STEP model, shown at the vise 1 station.</p>
+          <ModelFileField align={fixture.models.jaws1} cadFiles={cadFiles} autoLabel="None" onChange={modelFile("jaws1")} />
+          <AlignmentFields align={fixture.models.jaws1} onChange={(mut) => update((j) => mut(j.fixture.models.jaws1))} />
+        </Section>
+        <Section title="Soft Jaws - Vise 2" defaultOpen={false}>
+          <p className="hint">Optional: your own soft jaw STEP model, shown at the vise 2 station.</p>
+          <ModelFileField align={fixture.models.jaws2} cadFiles={cadFiles} autoLabel="None" onChange={modelFile("jaws2")} />
+          <AlignmentFields align={fixture.models.jaws2} onChange={(mut) => update((j) => mut(j.fixture.models.jaws2))} />
+        </Section>
         <Section title="Model Alignment - Flipper" defaultOpen={false}>
+          <ModelFileField align={fixture.models.flipper} cadFiles={cadFiles} autoLabel="Auto (bundled QuickFlip180)" onChange={modelFile("flipper")} />
           <AlignmentFields align={fixture.models.flipper} onChange={(mut) => update((j) => mut(j.fixture.models.flipper))} />
         </Section>
         <Section title="Model Alignment - Gripper" defaultOpen={false}>
           <p className="hint">Shown floating above the flipper for reference only.</p>
+          <ModelFileField align={fixture.models.gripper} cadFiles={cadFiles} autoLabel="Auto (bundled TSA gripper)" onChange={modelFile("gripper")} />
           <AlignmentFields align={fixture.models.gripper} onChange={(mut) => update((j) => mut(j.fixture.models.gripper))} />
         </Section>
       </div>

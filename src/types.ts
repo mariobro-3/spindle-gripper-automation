@@ -25,6 +25,10 @@ export interface MachineProfile {
   mcodes: McodeMap;
   gripperTool: number;
   gripperH: number;
+  /** use a different gripper tool for the flipped (Op2-side) part */
+  gripper2Enabled: boolean;
+  gripper2Tool: number;
+  gripper2H: number;
   chipFanTool: number;
   chipFanH: number;
   /** run the Haas chip fan table wash (N210) before the gripper grabs parts */
@@ -53,7 +57,11 @@ export interface ModelAlignment {
   offY: number;
   offZ: number;
   visible: boolean;
+  /** STEP file (relative path in the CAD library); empty = built-in auto-detect */
+  file?: string;
 }
+
+export type ModelKey = "vise" | "flipper" | "gripper" | "jaws1" | "jaws2";
 
 export interface FixtureConfig {
   plateLength: number; // X, 18
@@ -67,11 +75,22 @@ export interface FixtureConfig {
   flipperY: number;
   /** native units the STEP files were modeled in - applies to all imported models */
   stepUnits: "mm" | "inch";
-  models: {
-    vise: ModelAlignment;
-    flipper: ModelAlignment;
-    gripper: ModelAlignment;
-  };
+  models: Record<ModelKey, ModelAlignment>;
+}
+
+/**
+ * Spindle orientation (M19) per station: the gripper jaw direction at each
+ * pick/place. Because the spindle can re-orient while carrying a part, the
+ * tray angle and vise angle can differ - that is how you choose which way
+ * the stock goes into the vise.
+ */
+export interface SpindleOrientConfig {
+  enabled: boolean;
+  tray: number; // degrees at each station
+  vise1: number;
+  flipper: number;
+  vise2: number;
+  finished: number;
 }
 
 export type DatumRef = "front-left" | "front-right" | "back-left" | "back-right" | "center";
@@ -166,6 +185,7 @@ export interface JobConfig {
   stockTray: TrayConfig;
   finished: FinishedConfig;
   trayGen: TrayGenConfig;
+  spindleOrient: SpindleOrientConfig;
   templates: Record<TemplateKey, string>;
   op1Code: string;
   op2Code: string;

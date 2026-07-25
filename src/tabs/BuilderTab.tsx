@@ -117,6 +117,26 @@ export function BuilderTab() {
               onChange={(v) => update((j) => (j.options.faceRemovalOp1 = v))}
             />
           </Section>
+          <Section title="Spindle Orientation (M19)" defaultOpen={false}>
+            <CheckField
+              label="Orient spindle at each pick / place"
+              value={job.spindleOrient.enabled}
+              title="Inserts M19 lines so the gripper jaws face a known direction at every station"
+              onChange={(v) => update((j) => (j.spindleOrient.enabled = v))}
+            />
+            <NumField label="Tray pick angle" value={job.spindleOrient.tray} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.tray = v))} />
+            <NumField label="Vise 1 angle" value={job.spindleOrient.vise1} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.vise1 = v))} />
+            <NumField label="Flipper angle" value={job.spindleOrient.flipper} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.flipper = v))} />
+            <NumField label="Vise 2 angle" value={job.spindleOrient.vise2} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.vise2 = v))} />
+            <NumField label="Finished drop angle" value={job.spindleOrient.finished} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.finished = v))} />
+            <p className="hint">
+              Sets the gripper jaw direction at each station. The spindle re-orients <b>while carrying the
+              part</b>, so a different tray angle and vise angle rotates the stock between pick-up and the vise -
+              that is how you choose which way the stock goes into the vise. Angle 0 emits a plain M19; other
+              angles emit M19 R (requires the Haas spindle-orientation option). When off, comment placeholders
+              are emitted instead.
+            </p>
+          </Section>
           <Section title="Chip Fan Table Wash (N210)" defaultOpen={false}>
             {machine.chipFanEnabled ? (
               <p className="hint">

@@ -190,6 +190,23 @@ export function MachineTab() {
             <TextField label="Gripper open" value={machine.mcodes.gripperOpen} onChange={(v) => upd((m) => (m.mcodes.gripperOpen = v))} />
             <NumField label="Gripper tool number" value={machine.gripperTool} step={1} onChange={(v) => upd((m) => (m.gripperTool = Math.round(v)))} />
             <NumField label="Gripper H offset" value={machine.gripperH} step={1} onChange={(v) => upd((m) => (m.gripperH = Math.round(v)))} />
+            <CheckField
+              label="Different gripper for Op2 side"
+              value={machine.gripper2Enabled}
+              title="Use a second gripper tool for the flipped part: unload flipper, load/unload vise 2, and finished deposit"
+              onChange={(v) => upd((m) => (m.gripper2Enabled = v))}
+            />
+            {machine.gripper2Enabled && (
+              <>
+                <NumField label="Op2 gripper tool number" value={machine.gripper2Tool} step={1} onChange={(v) => upd((m) => (m.gripper2Tool = Math.round(v)))} />
+                <NumField label="Op2 gripper H offset" value={machine.gripper2H} step={1} onChange={(v) => upd((m) => (m.gripper2H = Math.round(v)))} />
+                <p className="hint">
+                  The op1 gripper (T{machine.gripperTool}) handles raw stock and the op1 part; the op2 gripper
+                  (T{machine.gripper2Tool}) takes over at the flipper and handles the flipped part through vise 2
+                  and the finished drop. The generator adds the extra tool changes automatically.
+                </p>
+              </>
+            )}
           </Section>
           <Section title="Air Vises">
             <TextField label="Vise 1 (Op1) close" value={machine.mcodes.vise1Close} onChange={(v) => upd((m) => (m.mcodes.vise1Close = v))} />

@@ -1,15 +1,11 @@
 import * as THREE from "three";
-import type { JobConfig, ModelAlignment } from "../types";
+import type { JobConfig, ModelAlignment, ModelKey } from "../types";
 import { datumLocal } from "../logic/offsets";
 import { machineOf } from "../logic/program";
 import { buildTrayGeometry, type TrayGeometry } from "../logic/trayModel";
 import { tSlotMachineYs } from "../logic/tSlots";
 
-export interface LoadedModels {
-  vise?: THREE.Group;
-  flipper?: THREE.Group;
-  gripper?: THREE.Group;
-}
+export type LoadedModels = Partial<Record<ModelKey, THREE.Group>>;
 
 const MM_TO_IN = 1 / 25.4;
 
@@ -202,6 +198,21 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
     const marker = stationMarker(s.marker);
     marker.position.set(s.x, s.y, 0.012);
     assembly.add(marker);
+  }
+
+  // soft jaws (user STEP files) sitting at the vise stations
+  const jawSlots: [ModelKey, number, number][] = [
+    ["jaws1", fx.vise1X, fx.vise1Y],
+    ["jaws2", fx.vise2X, fx.vise2Y],
+  ];
+  for (const [key, x, y] of jawSlots) {
+    const align = fx.models[key];
+    const model = models[key];
+    if (model && align?.visible) {
+      const obj = applyAlignment(model, align, stepScale);
+      obj.position.set(x, y, 0);
+      assembly.add(obj);
+    }
   }
 
   // gripper model floating above the flipper for reference

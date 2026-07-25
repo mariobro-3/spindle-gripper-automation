@@ -33,6 +33,15 @@ function readBody(req: Connect.IncomingMessage): Promise<string> {
   });
 }
 
+function readBodyBuffer(req: Connect.IncomingMessage): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (c) => chunks.push(Buffer.from(c)));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
+    req.on("error", reject);
+  });
+}
+
 function apiMiddleware(): Connect.NextHandleFunction {
   return async (req, res, next) => {
     const url = new URL(req.url ?? "/", "http://localhost");
@@ -79,6 +88,17 @@ function apiMiddleware(): Connect.NextHandleFunction {
 
       if (url.pathname === "/api/cad" && req.method === "GET") {
         return send(200, listStepFiles(CAD_DIR));
+      }
+
+      // upload a user STEP file into CAD Files/Custom
+      const cadUpload = url.pathname.match(/^\/api\/cad\/(.+)$/);
+      if (cadUpload && req.method === "POST") {
+        const name = safeName(cadUpload[1]);
+        if (!name || !/\.(step|stp)$/i.test(name)) return send(400, { error: "bad name" });
+        const customDir = path.join(CAD_DIR, "Custom");
+        fs.mkdirSync(customDir, { recursive: true });
+        fs.writeFileSync(path.join(customDir, name), await readBodyBuffer(req));
+        return send(200, { ok: true, path: `Custom/${name}` });
       }
 
       const cadMatch = url.pathname.match(/^\/cad\/(.+)$/);

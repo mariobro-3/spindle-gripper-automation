@@ -39,3 +39,15 @@ export async function listCadFiles(): Promise<string[]> {
 export function cadFileUrl(relPath: string): string {
   return `/cad/${relPath.split("/").map(encodeURIComponent).join("/")}`;
 }
+
+/** Upload a user STEP file into the CAD library. Returns its relative path. */
+export async function uploadCadFile(name: string, data: ArrayBuffer): Promise<string> {
+  const res = await fetch(`/api/cad/${encodeURIComponent(name)}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/octet-stream" },
+    body: data,
+  });
+  if (!res.ok) throw new Error("failed to upload STEP file");
+  const body = (await res.json()) as { path: string };
+  return body.path;
+}

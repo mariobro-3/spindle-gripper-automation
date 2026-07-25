@@ -85,6 +85,17 @@ export function tokenValues(job: JobConfig): Record<string, string> {
   const m = machineOf(job);
   const teed = m.mcodes.flipGripMode === "shared-vise1";
   const dropZ = job.finished.mode === "bin" ? job.finished.bin.dropZ : 0.05;
+  // spindle orient tokens resolve to a complete line (M19 needs the Haas
+  // spindle-orientation option for R angles other than 0)
+  const so = job.spindleOrient;
+  const orient = (angle: number, what: string) =>
+    so.enabled
+      ? angle === 0
+        ? `M19; (orient gripper 0 deg - ${what})`
+        : `M19 R${fmt(angle)}; (orient gripper ${fmt(angle)} deg - ${what})`
+      : `(spindle orient off - ${what})`;
+  const grip2Tool = m.gripper2Enabled ? m.gripper2Tool : m.gripperTool;
+  const grip2H = m.gripper2Enabled ? m.gripper2H : m.gripperH;
   return {
     PROG_NUM: job.options.programNumber.replace(/^O/i, ""),
     PROG_COMMENT: job.options.programComment.toUpperCase(),
@@ -92,6 +103,13 @@ export function tokenValues(job: JobConfig): Record<string, string> {
     DATE: new Date().toLocaleDateString(),
     GRIP_TOOL: String(m.gripperTool),
     GRIP_H: String(m.gripperH),
+    GRIP2_TOOL: String(grip2Tool),
+    GRIP2_H: String(grip2H),
+    ORIENT_TRAY: orient(so.tray, "tray pick"),
+    ORIENT_V1: orient(so.vise1, "vise 1"),
+    ORIENT_FLIP: orient(so.flipper, "flipper"),
+    ORIENT_V2: orient(so.vise2, "vise 2"),
+    ORIENT_FIN: orient(so.finished, "finished drop"),
     FAN_TOOL: String(m.chipFanTool),
     FAN_H: String(m.chipFanH),
     GRIP_CLOSE: m.mcodes.gripperClose,
@@ -223,6 +241,29 @@ export function buildProgram(job: JobConfig): BuildResult {
     ) {
       warnings.push(
         `Flipper grip is teed to vise 1: unloading the flipper opens vise 1, but the "flipCW" template does not re-clamp vise 1 (${m.mcodes.vise1Close}) before machining. Parts will be machined unclamped!`
+      );
+    }
+  }
+
+  // feature/template mismatch checks (users may have customized templates
+  // before these tokens existed)
+  if (m.gripper2Enabled) {
+    const op2Side = ["unloadVise2", "unloadFlipper"] as const;
+    for (const key of op2Side) {
+      if (!job.templates[key].includes("{GRIP2_TOOL}")) {
+        warnings.push(
+          `A second gripper (T${m.gripper2Tool}) is enabled, but the "${key}" template has no {GRIP2_TOOL} tool change - reset the template to default or add it.`
+        );
+      }
+    }
+  }
+  if (job.spindleOrient.enabled) {
+    const hasOrient = (Object.keys(job.templates) as TemplateKey[]).some((k) =>
+      /\{ORIENT_[A-Z0-9_]+\}/.test(job.templates[k])
+    );
+    if (!hasOrient) {
+      warnings.push(
+        "Spindle orientation is enabled, but no template contains an {ORIENT_*} token - reset the handling templates to default or add the tokens."
       );
     }
   }

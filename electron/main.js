@@ -14,6 +14,11 @@ const JOBS_DIR = app.isPackaged
 const CAD_DIR = app.isPackaged
   ? path.join(process.resourcesPath, "CAD Files")
   : path.join(__dirname, "..", "CAD Files");
+// User-uploaded STEP files (soft jaws, own vises). The bundled CAD folder is
+// read-only when packaged, so custom files live next to the saved jobs.
+const CUSTOM_CAD_DIR = app.isPackaged
+  ? path.join(app.getPath("documents"), "Spindle Gripper Jobs", "Custom CAD")
+  : path.join(CAD_DIR, "Custom");
 const DIST_DIR = path.join(__dirname, "..", "dist");
 
 const MIME = {
@@ -53,6 +58,15 @@ function readBody(req) {
     let data = "";
     req.on("data", (c) => (data += c));
     req.on("end", () => resolve(data));
+    req.on("error", reject);
+  });
+}
+
+function readBodyBuffer(req) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    req.on("data", (c) => chunks.push(Buffer.from(c)));
+    req.on("end", () => resolve(Buffer.concat(chunks)));
     req.on("error", reject);
   });
 }
@@ -101,14 +115,32 @@ async function handleRequest(req, res) {
     }
 
     if (url.pathname === "/api/cad" && req.method === "GET") {
-      return send(200, listStepFiles(CAD_DIR));
+      const files = listStepFiles(CAD_DIR);
+      // packaged: custom files live outside CAD_DIR, list them under Custom/
+      if (app.isPackaged) {
+        for (const f of listStepFiles(CUSTOM_CAD_DIR)) files.push(`Custom/${f}`);
+      }
+      return send(200, files);
+    }
+
+    // upload a user STEP file into the custom CAD folder
+    const cadUpload = url.pathname.match(/^\/api\/cad\/(.+)$/);
+    if (cadUpload && req.method === "POST") {
+      const name = safeName(cadUpload[1]);
+      if (!name || !/\.(step|stp)$/i.test(name)) return send(400, { error: "bad name" });
+      fs.mkdirSync(CUSTOM_CAD_DIR, { recursive: true });
+      fs.writeFileSync(path.join(CUSTOM_CAD_DIR, name), await readBodyBuffer(req));
+      return send(200, { ok: true, path: `Custom/${name}` });
     }
 
     const cadMatch = url.pathname.match(/^\/cad\/(.+)$/);
     if (cadMatch && req.method === "GET") {
       const rel = decodeURIComponent(cadMatch[1]);
       if (rel.includes("..")) return send(400, { error: "bad path" });
-      const file = path.join(CAD_DIR, rel);
+      const file =
+        app.isPackaged && rel.startsWith("Custom/")
+          ? path.join(CUSTOM_CAD_DIR, rel.slice("Custom/".length))
+          : path.join(CAD_DIR, rel);
       if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return send(404, { error: "not found" });
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/octet-stream");

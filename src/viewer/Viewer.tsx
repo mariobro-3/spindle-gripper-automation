@@ -7,53 +7,35 @@ import { listCadFiles, cadFileUrl } from "../api";
 import { loadStepMeshes, meshesToGroup } from "./stepLoader";
 import { buildFixtureScene, disposeObject, type LoadedModels } from "./scene";
 import { createViewCube } from "./viewCube";
+import type { ModelKey } from "../types";
 
-type ModelStatus = Record<"vise" | "flipper" | "gripper", "loading" | "ok" | "missing" | "error">;
+type SlotStatus = "loading" | "ok" | "missing" | "error" | "none";
+type ModelStatus = Record<ModelKey, SlotStatus>;
 
-const models: LoadedModels = {};
-let modelsPromise: Promise<void> | null = null;
-const statusListeners = new Set<(s: ModelStatus) => void>();
-const modelStatus: ModelStatus = { vise: "loading", flipper: "loading", gripper: "loading" };
+const MODEL_KEYS: ModelKey[] = ["vise", "flipper", "gripper", "jaws1", "jaws2"];
+/** keyword used to auto-pick a bundled STEP when no file is chosen; null = file required */
+const AUTO_KEYWORDS: Record<ModelKey, string | null> = {
+  vise: "vise",
+  flipper: "flip",
+  gripper: "gripper",
+  jaws1: null,
+  jaws2: null,
+};
 
-function notifyStatus() {
-  for (const l of statusListeners) l({ ...modelStatus });
+let cadListPromise: Promise<string[]> | null = null;
+function getCadList(): Promise<string[]> {
+  if (!cadListPromise) cadListPromise = listCadFiles().catch(() => []);
+  return cadListPromise;
 }
 
-function ensureModelsLoaded(): Promise<void> {
-  if (!modelsPromise) {
-    modelsPromise = (async () => {
-      let files: string[] = [];
-      try {
-        files = await listCadFiles();
-      } catch {
-        /* server offline - fall back to boxes */
-      }
-      const find = (kw: string) => files.find((f) => f.toLowerCase().includes(kw));
-      const entries: [keyof LoadedModels, string | undefined][] = [
-        ["vise", find("vise")],
-        ["flipper", find("flip")],
-        ["gripper", find("gripper")],
-      ];
-      await Promise.all(
-        entries.map(async ([key, rel]) => {
-          if (!rel) {
-            modelStatus[key] = "missing";
-            notifyStatus();
-            return;
-          }
-          try {
-            const meshes = await loadStepMeshes(cadFileUrl(rel));
-            models[key] = meshesToGroup(meshes);
-            modelStatus[key] = "ok";
-          } catch {
-            modelStatus[key] = "error";
-          }
-          notifyStatus();
-        })
-      );
-    })();
+const groupCache = new Map<string, Promise<THREE.Group>>();
+function loadModelGroup(rel: string): Promise<THREE.Group> {
+  let p = groupCache.get(rel);
+  if (!p) {
+    p = loadStepMeshes(cadFileUrl(rel)).then(meshesToGroup);
+    groupCache.set(rel, p);
   }
-  return modelsPromise;
+  return p;
 }
 
 export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null }) {
@@ -61,9 +43,52 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
   const cubeMountRef = useRef<HTMLDivElement>(null);
   const sceneGroupRef = useRef<THREE.Group | null>(null);
   const sceneRef = useRef<THREE.Scene | null>(null);
-  const [status, setStatus] = useState<ModelStatus>({ ...modelStatus });
-  const [modelsReady, setModelsReady] = useState(0);
+  const [status, setStatus] = useState<ModelStatus>({
+    vise: "loading",
+    flipper: "loading",
+    gripper: "loading",
+    jaws1: "none",
+    jaws2: "none",
+  });
+  const [models, setModels] = useState<LoadedModels>({});
   const job = useApp((s) => s.job);
+
+  // load STEP models per slot; explicit file choices win over keyword auto-detect
+  const fileChoices = MODEL_KEYS.map((k) => job.fixture.models[k]?.file ?? "");
+  useEffect(() => {
+    let alive = true;
+    void (async () => {
+      const files = await getCadList();
+      const find = (kw: string) => files.find((f) => f.toLowerCase().includes(kw));
+      const next: LoadedModels = {};
+      const st = {} as ModelStatus;
+      await Promise.all(
+        MODEL_KEYS.map(async (key) => {
+          const cfg = job.fixture.models[key];
+          const kw = AUTO_KEYWORDS[key];
+          const rel = cfg?.file || (kw ? find(kw) : undefined);
+          if (!rel) {
+            st[key] = kw ? "missing" : "none";
+            return;
+          }
+          try {
+            next[key] = await loadModelGroup(rel);
+            st[key] = "ok";
+          } catch {
+            st[key] = "error";
+          }
+        })
+      );
+      if (alive) {
+        setModels(next);
+        setStatus(st);
+      }
+    })();
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, fileChoices);
 
   // one-time renderer setup
   useEffect(() => {
@@ -129,15 +154,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
     const ro = new ResizeObserver(resize);
     ro.observe(mount);
 
-    const onStatus = (s: ModelStatus) => {
-      setStatus(s);
-      setModelsReady((n) => n + 1);
-    };
-    statusListeners.add(onStatus);
-    void ensureModelsLoaded();
-
     return () => {
-      statusListeners.delete(onStatus);
       cancelAnimationFrame(raf);
       ro.disconnect();
       viewCube.dispose();
@@ -165,7 +182,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       scene.add(group);
     }, 60);
     return () => clearTimeout(timer);
-  }, [job, modelsReady]);
+  }, [job, models]);
 
   // optional extra object (e.g. generated tray preview)
   useEffect(() => {
@@ -177,7 +194,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
     };
   }, [extraObject]);
 
-  const statusLabel = (s: ModelStatus[keyof ModelStatus]) =>
+  const statusLabel = (s: SlotStatus) =>
     s === "ok" ? "loaded" : s === "loading" ? "loading..." : s === "missing" ? "file not found" : "parse error";
 
   return (
@@ -187,6 +204,12 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
         <span className={`badge badge-${status.vise}`}>Vise: {statusLabel(status.vise)}</span>
         <span className={`badge badge-${status.flipper}`}>Flipper: {statusLabel(status.flipper)}</span>
         <span className={`badge badge-${status.gripper}`}>Gripper: {statusLabel(status.gripper)}</span>
+        {status.jaws1 !== "none" && (
+          <span className={`badge badge-${status.jaws1}`}>Jaws 1: {statusLabel(status.jaws1)}</span>
+        )}
+        {status.jaws2 !== "none" && (
+          <span className={`badge badge-${status.jaws2}`}>Jaws 2: {statusLabel(status.jaws2)}</span>
+        )}
       </div>
       <div ref={cubeMountRef} className="viewer-cube" />
       <div className="viewer-legend">

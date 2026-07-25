@@ -19,6 +19,9 @@ export function defaultModelAlignments() {
     vise: { ...defaultAlignment(), rotX: 90 },
     flipper: { ...defaultAlignment(), rotX: 90, rotZ: 90 },
     gripper: { ...defaultAlignment(), rotX: 90, visible: false },
+    // soft jaws: user-provided STEP files shown at the vise stations
+    jaws1: { ...defaultAlignment(), visible: false },
+    jaws2: { ...defaultAlignment(), visible: false },
   };
 }
 
@@ -67,6 +70,9 @@ function gimbelExampleMcodes() {
 const machineBase = {
   gripperTool: 17,
   gripperH: 17,
+  gripper2Enabled: false,
+  gripper2Tool: 18,
+  gripper2H: 18,
   chipFanTool: 1,
   chipFanH: 1,
   chipFanEnabled: false,
@@ -180,6 +186,7 @@ G53 G0 Z0.; (move z to machine home)`,
 G90 G94 G17 G20; (settings)
 T{GRIP_TOOL} M6; (get gripper)
 G43 H{GRIP_H}; (activate gripper height offset)
+{ORIENT_TRAY}
 {WCS_TRAY}; (tray work offset - xy set by pocket position macro)
 G1 Z1.0 F{F_APPR}; (lower to z1.0 above tray z0)
 G1 Z0. F{F_INS}; (lower onto stock in pocket)
@@ -187,6 +194,7 @@ G1 Z0. F{F_INS}; (lower onto stock in pocket)
 G04 P1.0; (wait one second)
 G1 Z1. F{F_INS}; (raise part to z1)
 G53 G1 Z0. F{F_POS}; (raise part to machine z0)
+{ORIENT_V1}
 {V1_OPEN}; (open vise 1 - opens flipper grip too if teed)
 {WCS_V1}; (vise 1 work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over vise 1)
@@ -244,6 +252,7 @@ M99; (return to main program)`,
 G90 G94 G17 G20; (settings)
 T{GRIP_TOOL} M6; (get gripper)
 G43 H{GRIP_H}; (activate gripper height offset)
+{ORIENT_V1}
 {WCS_V1}; (vise 1 work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over vise 1)
 G1 Z2. F{F_APPR}; (move to z2)
@@ -259,6 +268,7 @@ M99; (return to main program)`,
 
   loadFlipper: `N204; (LOAD FLIPPER AND CLOSE FLIPPER GRIP)
 G90 G94 G17 G20; (settings)
+{ORIENT_FLIP}
 {WCS_FLIP}; (flipper work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over flipper nest)
 G1 Z2. F{F_APPR}; (move to z2)
@@ -280,8 +290,9 @@ M99; (return to main program)`,
 
   unloadVise2: `N206; (UNLOAD VISE 2 - GRAB FINISHED PART)
 G90 G94 G17 G20; (settings)
-T{GRIP_TOOL} M6; (get gripper)
-G43 H{GRIP_H}; (activate gripper height offset)
+T{GRIP2_TOOL} M6; (get op2 gripper)
+G43 H{GRIP2_H}; (activate gripper height offset)
+{ORIENT_V2}
 {WCS_V2}; (vise 2 work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over vise 2)
 G1 Z2. F{F_APPR}; (move to z2)
@@ -296,6 +307,7 @@ G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
 
   depositFinished: `N203; (DEPOSIT FINISHED PART - XY SET BY POSITION MACRO)
+{ORIENT_FIN}
 G1 Z{DROP_Z} F{F_APPR}; (lower to drop height)
 {GRIP_OPEN}; (release part)
 G04 P1.0; (wait)
@@ -304,6 +316,9 @@ M99; (return to main program)`,
 
   unloadFlipper: `N207; (UNLOAD FLIPPER - GRAB FLIPPED PART)
 G90 G94 G17 G20; (settings)
+T{GRIP2_TOOL} M6; (get op2 gripper - no-op if already in spindle)
+G43 H{GRIP2_H}; (activate gripper height offset)
+{ORIENT_FLIP}
 {WCS_FLIP}; (flipper work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over flipper nest)
 G1 Z2. F{F_APPR}; (move to z2)
@@ -320,6 +335,7 @@ M99; (return to main program)`,
 
   loadVise2: `N208; (LOAD VISE 2)
 G90 G94 G17 G20; (settings)
+{ORIENT_V2}
 {V2_OPEN}; (open vise 2)
 {WCS_V2}; (vise 2 work offset)
 G1 X0. Y0. F{F_POS}; (center gripper over vise 2)
@@ -350,7 +366,7 @@ G53 G0 X0. Y0.; (go to machine home)
 M30; (end program)`,
 };
 
-export const JOB_VERSION = 7;
+export const JOB_VERSION = 8;
 
 export function defaultJob(): JobConfig {
   return {
@@ -399,6 +415,14 @@ export function defaultJob(): JobConfig {
         pitchX: 2.5,
         pitchY: 2.5,
       },
+    },
+    spindleOrient: {
+      enabled: false,
+      tray: 0,
+      vise1: 0,
+      flipper: 0,
+      vise2: 0,
+      finished: 0,
     },
     trayGen: {
       pocketClearance: 0.01,

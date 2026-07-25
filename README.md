@@ -49,6 +49,10 @@ Pick your machine (VF-9SS, VF-3SS, and VF-4SS ship pre-configured) or click
   flipper grip air supply. The teed circuit (flipper grip shared with the vise 1 air
   line) is supported; the generated cycle re-clamps vise 1 at the right moments.
 - **Gripper and chip fan tool numbers / H offsets**, and default feeds.
+- **Second gripper for Op2** - optional; if the flipped part needs different jaws, gripper 1
+  handles raw stock and the op1 part while gripper 2 takes over at the flipper and handles
+  the flipped part through vise 2 and the finished drop. The generator inserts the extra
+  tool changes automatically.
 - **Haas chip fan table wash** - optional; when on, the fan program (from
   `NC add-ins/FAN.nc`) runs after each machining block, before the gripper grabs parts.
 
@@ -62,6 +66,11 @@ and the finished-parts bin. Use the view cube in the corner to snap views.
 - **Placement on Bed** positions the whole assembly: pick a datum reference point on the
   plate, give its machine XY, and set the rotation. Plate, vises, and flipper move
   together as one assembly, and every work offset follows automatically.
+- **Your own CAD** - upload your own STEP files (your vises, soft jaws) with
+  **Add STEP file...** in the STEP Models section, then pick them in any model slot.
+  There are dedicated soft-jaw slots for vise 1 and vise 2 with full alignment controls.
+  In the installed app, uploaded files are kept in
+  **Documents\Spindle Gripper Jobs\Custom CAD**.
 
 ### 3. Datum & Offsets
 
@@ -98,6 +107,11 @@ Builds the physical load tray from the same tray definition, previewed as a real
   part-handling macros (N200-N210) generated from editable templates.
 - Options: chip clearing between parts, embedded G10 offset lines, and Op1 facing
   compensation (the gripper reaches lower when regripping a faced part).
+- **Spindle orientation (M19)** - optional per-station angles for the gripper jaws at the
+  tray pick, vise 1, flipper, vise 2, and finished drop. The spindle re-orients while
+  carrying the part, so a different tray angle vs. vise angle rotates the stock between
+  pick-up and the vise - that is how you choose which way the stock goes into the vise.
+  Angles other than 0 emit `M19 R` (requires the Haas spindle-orientation option).
 
 ### 7. Jobs
 
