@@ -2,6 +2,9 @@ export type WcsCode = "G54" | "G55" | "G56" | "G57" | "G58" | "G59";
 
 export type StationKey = "vise1" | "tray" | "vise2" | "flipper" | "finished";
 
+/** dedicated = own solenoid / M-codes; shared-viseN = teed onto that vise's air lines */
+export type AirSupplyMode = "dedicated" | "shared-vise1" | "shared-vise2";
+
 export interface McodeMap {
   gripperClose: string;
   gripperOpen: string;
@@ -11,10 +14,25 @@ export interface McodeMap {
   vise2Open: string;
   flipCW: string;
   flipCCW: string;
-  /** "shared-vise1" = flipper grip is teed to the vise 1 air lines */
-  flipGripMode: "shared-vise1" | "dedicated";
+  /** flipper rotation air supply; when teed, vise close = rotate CW, vise open = rotate CCW */
+  flipRotateMode: AirSupplyMode;
+  /** flipper grip air supply; when teed, vise close = grip closed, vise open = grip open */
+  flipGripMode: AirSupplyMode;
   flipGripClose: string;
   flipGripOpen: string;
+}
+
+/** actuation dwell times in milliseconds, emitted as integer G04 P values */
+export interface DelayConfig {
+  gripperBefore: number;
+  gripperAfter: number;
+  vise1Before: number;
+  vise1After: number;
+  vise2Before: number;
+  vise2After: number;
+  flipGripBefore: number;
+  flipGripAfter: number;
+  flipRotateAfter: number;
 }
 
 export interface MachineProfile {
@@ -46,6 +64,8 @@ export interface MachineProfile {
   positionFeed: number;
   approachFeed: number;
   insertFeed: number;
+  /** G04 dwell table for air actuations */
+  delays: DelayConfig;
 }
 
 /** Alignment tweaks applied to an imported STEP model in the viewer */
@@ -173,6 +193,13 @@ export interface ProgramOptions {
   faceRemovalOp1: number; // material faced off in op1, lowers regrip Z
 }
 
+/** manually entered machine coordinates for one work offset */
+export interface StationXYZ {
+  x: number;
+  y: number;
+  z: number;
+}
+
 export interface JobConfig {
   version: number;
   name: string;
@@ -181,6 +208,8 @@ export interface JobConfig {
   fixture: FixtureConfig;
   datum: DatumConfig;
   wcs: Record<StationKey, WcsCode>;
+  /** offset sheet values - fully manual, seeded once from the fixture layout */
+  offsets: Record<StationKey, StationXYZ>;
   stock: StockConfig;
   stockTray: TrayConfig;
   finished: FinishedConfig;

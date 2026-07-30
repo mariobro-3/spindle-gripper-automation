@@ -7,6 +7,19 @@ import { tSlotMachineYs } from "../logic/tSlots";
 
 export type LoadedModels = Partial<Record<ModelKey, THREE.Group>>;
 
+/** live object handles for the kinematic simulation, stored on root.userData.simHandles */
+export interface SimHandles {
+  gripper: THREE.Group;
+  gripDot: THREE.Mesh;
+  parts: THREE.Mesh[];
+  flipperPivot: THREE.Group | null;
+  markers: { vise1: THREE.Mesh; vise2: THREE.Mesh; flipper: THREE.Mesh };
+  trayStock: THREE.Object3D[];
+}
+
+/** height of the flipper rotation axis above the plate top (viewer approximation) */
+export const FLIP_AXIS_Z = 3.2;
+
 const MM_TO_IN = 1 / 25.4;
 
 const matPlate = new THREE.MeshStandardMaterial({ color: 0xb8bcc2, metalness: 0.6, roughness: 0.35 });
@@ -53,11 +66,12 @@ function fallbackBox(l: number, w: number, h: number, mat: THREE.Material): THRE
   return g;
 }
 
-function stationMarker(color: number): THREE.Object3D {
+function stationMarker(color: number): THREE.Mesh {
   const geo = new THREE.RingGeometry(0.18, 0.28, 32);
   const mat = new THREE.MeshBasicMaterial({ color, side: THREE.DoubleSide });
   const ring = new THREE.Mesh(geo, mat);
   ring.position.z = 0.012;
+  ring.userData.baseColor = color;
   return ring;
 }
 
@@ -101,6 +115,7 @@ function trayObject(
         matStock
       );
       stock.position.set(originX + p.cx, originY + p.cy, pocketFloorZ + job.stock.height / 2);
+      stock.userData.trayStock = true; // hidden while the simulation runs its own parts
       g.add(stock);
     }
   }
@@ -170,18 +185,21 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
 
   // stations on the plate
   const stations: {
+    key: "vise1" | "vise2" | "flipper";
     x: number;
     y: number;
     model?: THREE.Group;
     align: ModelAlignment;
     fallback: [number, number, number];
     marker: number;
-    extraRotZ?: number;
   }[] = [
-    { x: fx.vise1X, y: fx.vise1Y, model: models.vise, align: fx.models.vise, fallback: [4, 5, 3], marker: 0xff5555 },
-    { x: fx.vise2X, y: fx.vise2Y, model: models.vise, align: fx.models.vise, fallback: [4, 5, 3], marker: 0x5599ff },
-    { x: fx.flipperX, y: fx.flipperY, model: models.flipper, align: fx.models.flipper, fallback: [5, 4, 4], marker: 0xffcc44 },
+    { key: "vise1", x: fx.vise1X, y: fx.vise1Y, model: models.vise, align: fx.models.vise, fallback: [4, 5, 3], marker: 0xff5555 },
+    { key: "vise2", x: fx.vise2X, y: fx.vise2Y, model: models.vise, align: fx.models.vise, fallback: [4, 5, 3], marker: 0x5599ff },
+    { key: "flipper", x: fx.flipperX, y: fx.flipperY, model: models.flipper, align: fx.models.flipper, fallback: [5, 4, 4], marker: 0xffcc44 },
   ];
+
+  const markers = {} as SimHandles["markers"];
+  let flipperPivot: THREE.Group | null = null;
 
   for (const s of stations) {
     let obj: THREE.Group;
@@ -192,12 +210,22 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
     } else {
       obj = new THREE.Group();
     }
-    obj.position.set(s.x, s.y, 0);
-    if (s.extraRotZ) obj.rotation.z = s.extraRotZ;
-    assembly.add(obj);
+    if (s.key === "flipper") {
+      // wrap in a pivot at the nest axis so the simulation can swing it 180
+      const pivot = new THREE.Group();
+      pivot.position.set(s.x, s.y, FLIP_AXIS_Z);
+      obj.position.set(0, 0, -FLIP_AXIS_Z);
+      pivot.add(obj);
+      assembly.add(pivot);
+      flipperPivot = pivot;
+    } else {
+      obj.position.set(s.x, s.y, 0);
+      assembly.add(obj);
+    }
     const marker = stationMarker(s.marker);
     marker.position.set(s.x, s.y, 0.012);
     assembly.add(marker);
+    markers[s.key] = marker;
   }
 
   // soft jaws (user STEP files) sitting at the vise stations
@@ -274,6 +302,48 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
     edges.position.copy(box.position);
     root.add(edges);
   }
+
+  // ---- simulation objects (hidden until the simulation runs) ----
+  // animated gripper: group origin = grip tip (bottom center of the model)
+  const simGripper = new THREE.Group();
+  const gripBody = models.gripper
+    ? applyAlignment(models.gripper, fx.models.gripper, stepScale)
+    : fallbackBox(1.4, 1.4, 4, matFallback);
+  simGripper.add(gripBody);
+  const gripDot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.22, 16, 16),
+    new THREE.MeshBasicMaterial({ color: 0xffb347 })
+  );
+  gripDot.position.set(0, 0, 0.1);
+  simGripper.add(gripDot);
+  simGripper.visible = false;
+  root.add(simGripper);
+
+  // simulated parts (one box per tray pocket, moved along the timeline)
+  const partGeo = new THREE.BoxGeometry(job.stock.length, job.stock.width, job.stock.height);
+  const simParts: THREE.Mesh[] = [];
+  const partCount = job.stockTray.countX * job.stockTray.countY;
+  for (let i = 0; i < partCount; i++) {
+    const mesh = new THREE.Mesh(partGeo, matStock);
+    mesh.visible = false;
+    root.add(mesh);
+    simParts.push(mesh);
+  }
+
+  const trayStock: THREE.Object3D[] = [];
+  root.traverse((o) => {
+    if (o.userData.trayStock) trayStock.push(o);
+  });
+
+  const handles: SimHandles = {
+    gripper: simGripper,
+    gripDot,
+    parts: simParts,
+    flipperPivot,
+    markers,
+    trayStock,
+  };
+  root.userData.simHandles = handles;
 
   return root;
 }

@@ -1,7 +1,7 @@
 {
   "name": "spindle-gripper-automation",
   "private": true,
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Gimbel Automation spindle gripper / QuickFlip180 two-op programming and fixture tool",
   "author": "Gimbel Automation",
   "type": "module",

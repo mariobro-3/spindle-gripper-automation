@@ -81,10 +81,24 @@ export function machineOf(job: JobConfig): MachineProfile {
   return job.machines.find((m) => m.id === job.machineId) ?? job.machines[0];
 }
 
+/** vise close/open codes for a shared air line, or null when dedicated */
+function sharedViseCodes(m: MachineProfile, mode: string): { close: string; open: string } | null {
+  if (mode === "shared-vise1") return { close: m.mcodes.vise1Close, open: m.mcodes.vise1Open };
+  if (mode === "shared-vise2") return { close: m.mcodes.vise2Close, open: m.mcodes.vise2Open };
+  return null;
+}
+
 export function tokenValues(job: JobConfig): Record<string, string> {
   const m = machineOf(job);
-  const teed = m.mcodes.flipGripMode === "shared-vise1";
+  const gripShared = sharedViseCodes(m, m.mcodes.flipGripMode);
+  const rotShared = sharedViseCodes(m, m.mcodes.flipRotateMode);
   const dropZ = job.finished.mode === "bin" ? job.finished.bin.dropZ : 0.05;
+  // delay tokens resolve to complete G04 lines (integer P = milliseconds on Haas)
+  const d = m.delays;
+  const dly = (ms: number, what: string) => {
+    const v = Math.max(0, Math.round(ms));
+    return v > 0 ? `G04 P${v}; (wait ${v} ms - ${what})` : `(no delay - ${what})`;
+  };
   // spindle orient tokens resolve to a complete line (M19 needs the Haas
   // spindle-orientation option for R angles other than 0)
   const so = job.spindleOrient;
@@ -118,10 +132,19 @@ export function tokenValues(job: JobConfig): Record<string, string> {
     V1_OPEN: m.mcodes.vise1Open,
     V2_CLOSE: m.mcodes.vise2Close,
     V2_OPEN: m.mcodes.vise2Open,
-    FLIP_CW: m.mcodes.flipCW,
-    FLIP_CCW: m.mcodes.flipCCW,
-    FGRIP_CLOSE: teed ? m.mcodes.vise1Close : m.mcodes.flipGripClose,
-    FGRIP_OPEN: teed ? m.mcodes.vise1Open : m.mcodes.flipGripOpen,
+    FLIP_CW: rotShared ? rotShared.close : m.mcodes.flipCW,
+    FLIP_CCW: rotShared ? rotShared.open : m.mcodes.flipCCW,
+    FGRIP_CLOSE: gripShared ? gripShared.close : m.mcodes.flipGripClose,
+    FGRIP_OPEN: gripShared ? gripShared.open : m.mcodes.flipGripOpen,
+    D_GRIP_PRE: dly(d.gripperBefore, "before gripper"),
+    D_GRIP_POST: dly(d.gripperAfter, "after gripper"),
+    D_V1_PRE: dly(d.vise1Before, "before vise 1"),
+    D_V1_POST: dly(d.vise1After, "after vise 1"),
+    D_V2_PRE: dly(d.vise2Before, "before vise 2"),
+    D_V2_POST: dly(d.vise2After, "after vise 2"),
+    D_FGRIP_PRE: dly(d.flipGripBefore, "before flipper grip"),
+    D_FGRIP_POST: dly(d.flipGripAfter, "after flipper grip"),
+    D_FLIP_POST: dly(d.flipRotateAfter, "after flipper rotation"),
     WCS_V1: job.wcs.vise1,
     WCS_TRAY: job.wcs.tray,
     WCS_V2: job.wcs.vise2,
@@ -195,7 +218,6 @@ export function buildProgram(job: JobConfig): BuildResult {
   const warnings: string[] = [];
   const tokens = tokenValues(job);
   const m = machineOf(job);
-  const teed = m.mcodes.flipGripMode === "shared-vise1";
 
   const pockets = trayPockets(
     job.stockTray.countX,
@@ -228,19 +250,50 @@ export function buildProgram(job: JobConfig): BuildResult {
     if (unk.length) warnings.push(`Template "${key}" has unknown tokens: ${unk.join(", ")}`);
   }
 
-  // teed-circuit safety check: after unloadFlipper (which opens vise 1 via the
-  // shared line), vise 1 must be re-clamped before machining. The default
-  // flipCW template does this; warn if the user edited it away.
-  if (teed) {
+  // teed-circuit safety checks
+  const gripMode = m.mcodes.flipGripMode;
+  const rotMode = m.mcodes.flipRotateMode;
+  if (gripMode !== "dedicated" && gripMode === rotMode) {
+    warnings.push(
+      `Flipper grip AND flipper rotation are both teed to the same vise line (${gripMode.replace("shared-", "")}) - one air circuit cannot drive both. Fix the air supply modes in Machine Config.`
+    );
+  }
+  // After unloadFlipper opens the shared grip line, the teed vise is open too
+  // and must be re-clamped before machining. vise 1 is re-clamped by the
+  // default flipCW template; vise 2 is re-clamped by the loadVise2 template.
+  if (gripMode === "shared-vise1") {
     const resolvedFlipCW = resolveTemplate(job.templates.flipCW, tokens).toUpperCase();
     const resolvedUnloadFlipper = resolveTemplate(job.templates.unloadFlipper, tokens).toUpperCase();
-    const v1close = m.mcodes.vise1Close.toUpperCase();
     if (
       resolvedUnloadFlipper.includes(m.mcodes.vise1Open.toUpperCase()) &&
-      !resolvedFlipCW.includes(v1close)
+      !resolvedFlipCW.includes(m.mcodes.vise1Close.toUpperCase())
     ) {
       warnings.push(
         `Flipper grip is teed to vise 1: unloading the flipper opens vise 1, but the "flipCW" template does not re-clamp vise 1 (${m.mcodes.vise1Close}) before machining. Parts will be machined unclamped!`
+      );
+    }
+  }
+  if (gripMode === "shared-vise2") {
+    const resolvedLoadVise2 = resolveTemplate(job.templates.loadVise2, tokens).toUpperCase();
+    if (!resolvedLoadVise2.includes(m.mcodes.vise2Close.toUpperCase())) {
+      warnings.push(
+        `Flipper grip is teed to vise 2: unloading the flipper opens vise 2, but the "loadVise2" template does not clamp vise 2 (${m.mcodes.vise2Close}) before machining. Parts will be machined unclamped!`
+      );
+    }
+  }
+  if (rotMode === "shared-vise2") {
+    const resolvedLoadVise2 = resolveTemplate(job.templates.loadVise2, tokens).toUpperCase();
+    if (!resolvedLoadVise2.includes(m.mcodes.vise2Close.toUpperCase())) {
+      warnings.push(
+        `Flipper rotation is teed to vise 2 (${m.mcodes.vise2Open} rotates CCW and opens vise 2), but the "loadVise2" template never clamps vise 2 (${m.mcodes.vise2Close}). Parts will be machined unclamped!`
+      );
+    }
+  }
+  if (rotMode === "shared-vise1") {
+    const resolvedFlipCW = resolveTemplate(job.templates.flipCW, tokens).toUpperCase();
+    if (!resolvedFlipCW.includes(m.mcodes.vise1Close.toUpperCase())) {
+      warnings.push(
+        `Flipper rotation is teed to vise 1 (${m.mcodes.vise1Open} rotates CCW and opens vise 1), but the "flipCW" template never re-clamps vise 1 (${m.mcodes.vise1Close}) before machining.`
       );
     }
   }

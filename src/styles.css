@@ -174,6 +174,46 @@ body {
 .viewer-cube canvas {
   display: block;
 }
+.sim-bar {
+  position: absolute;
+  bottom: 44px;
+  left: 10px;
+  right: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  background: rgba(20, 22, 26, 0.85);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 10px;
+  font-size: 12px;
+  color: var(--text-dim);
+}
+.sim-bar input[type="range"] {
+  flex: 1;
+  min-width: 60px;
+  accent-color: var(--accent);
+}
+.sim-bar select {
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+.sim-clock {
+  font-family: var(--mono);
+  white-space: nowrap;
+}
+.sim-label {
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 34%;
+}
+
 .viewer-legend {
   position: absolute;
   bottom: 10px;
@@ -322,6 +362,17 @@ table.data th {
 }
 table.data td.num { font-family: var(--mono); text-align: right; }
 table.data td.wcs { font-family: var(--mono); color: var(--accent); font-weight: 600; }
+table.data td input[type="number"] {
+  width: 90px;
+  background: var(--panel2);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-family: var(--mono);
+  font-size: 13px;
+  text-align: right;
+}
 
 /* ---------- code ---------- */
 textarea.code, pre.code {

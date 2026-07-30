@@ -1,4 +1,4 @@
-import type { DatumRef, JobConfig, StationKey, WcsCode } from "../types";
+import type { DatumRef, JobConfig, StationKey, StationXYZ, WcsCode } from "../types";
 
 export interface StationOffset {
   station: StationKey;
@@ -52,62 +52,51 @@ export function plateToMachine(job: JobConfig, localX: number, localY: number): 
   };
 }
 
-export function computeOffsets(job: JobConfig): StationOffset[] {
-  const { fixture, datum, wcs, stockTray, finished } = job;
+/**
+ * Offsets computed from the fixture layout + probed datum. Used only to SEED
+ * the manual offset sheet (new jobs / migration) - the sheet itself is fully
+ * manual after that.
+ */
+export function autoOffsets(job: JobConfig): Record<StationKey, StationXYZ> {
+  const { fixture, datum, stockTray, finished } = job;
 
   const v1 = plateToMachine(job, fixture.vise1X, fixture.vise1Y);
   const v2 = plateToMachine(job, fixture.vise2X, fixture.vise2Y);
   const fl = plateToMachine(job, fixture.flipperX, fixture.flipperY);
-
   const finishedPos =
     finished.mode === "bin"
       ? { x: finished.bin.x, y: finished.bin.y }
       : { x: finished.tray.firstPocketX, y: finished.tray.firstPocketY };
 
-  const rows: StationOffset[] = [
-    {
-      station: "vise1",
-      label: "Vise 1 (Op1) part center",
-      wcs: wcs.vise1,
-      ...v1,
-      z: datum.zValues.vise1,
-      note: "Z = bottom of stock in clamped position",
-    },
-    {
-      station: "flipper",
-      label: "Flipper nest center",
-      wcs: wcs.flipper,
-      ...fl,
-      z: datum.zValues.flipper,
-      note: "Z = bottom of part seated in flipper grip",
-    },
-    {
-      station: "vise2",
-      label: "Vise 2 (Op2) part center",
-      wcs: wcs.vise2,
-      ...v2,
-      z: datum.zValues.vise2,
-      note: "Z = bottom of part in clamped position",
-    },
-    {
-      station: "tray",
-      label: "Stock tray first pocket",
-      wcs: wcs.tray,
-      x: stockTray.firstPocketX,
-      y: stockTray.firstPocketY,
-      z: datum.zValues.tray,
-      note: "XY center + Z bottom of first (bottom-left) pocket",
-    },
-    {
-      station: "finished",
-      label: finished.mode === "bin" ? "Finished parts bin (drop point)" : "Finished tray first pocket",
-      wcs: wcs.finished,
-      ...finishedPos,
-      z: datum.zValues.finished,
-      note: finished.mode === "bin" ? "Drop point over bin center" : "XY center + Z bottom of first pocket",
-    },
-  ];
-  return rows;
+  return {
+    vise1: { ...v1, z: datum.zValues.vise1 },
+    flipper: { ...fl, z: datum.zValues.flipper },
+    vise2: { ...v2, z: datum.zValues.vise2 },
+    tray: { x: stockTray.firstPocketX, y: stockTray.firstPocketY, z: datum.zValues.tray },
+    finished: { ...finishedPos, z: datum.zValues.finished },
+  };
+}
+
+export const STATION_INFO: { station: StationKey; label: string; note: string }[] = [
+  { station: "vise1", label: "Vise 1 (Op1) part center", note: "Z = bottom of stock in clamped position" },
+  { station: "flipper", label: "Flipper nest center", note: "Z = bottom of part seated in flipper grip" },
+  { station: "vise2", label: "Vise 2 (Op2) part center", note: "Z = bottom of part in clamped position" },
+  { station: "tray", label: "Stock tray first pocket", note: "XY center + Z bottom of first (bottom-left) pocket" },
+  { station: "finished", label: "Finished bin / tray", note: "Drop point or first pocket center" },
+];
+
+/** offset sheet rows: WCS assignments + the manually entered coordinates */
+export function computeOffsets(job: JobConfig): StationOffset[] {
+  return STATION_INFO.map((info) => {
+    const label =
+      info.station === "finished"
+        ? job.finished.mode === "bin"
+          ? "Finished parts bin (drop point)"
+          : "Finished tray first pocket"
+        : info.label;
+    const o = job.offsets[info.station];
+    return { station: info.station, label, wcs: job.wcs[info.station], x: o.x, y: o.y, z: o.z, note: info.note };
+  });
 }
 
 const WCS_P: Record<WcsCode, number> = { G54: 1, G55: 2, G56: 3, G57: 4, G58: 5, G59: 6 };

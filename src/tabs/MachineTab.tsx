@@ -3,7 +3,7 @@ import { useApp } from "../store";
 import { createMachineProfile } from "../defaults";
 import { machineOf } from "../logic/program";
 import { CheckField, NumField, Section, SelectField, TextField } from "../ui";
-import type { MachineProfile } from "../types";
+import type { DelayConfig, MachineProfile } from "../types";
 
 function uniqueMachineId(existing: MachineProfile[]): string {
   let n = existing.length + 1;
@@ -75,7 +75,7 @@ export function MachineTab() {
       j.machineId = j.machines[Math.max(0, idx - 1)].id;
     });
 
-  const teed = machine.mcodes.flipGripMode === "shared-vise1";
+  const teed = machine.mcodes.flipGripMode !== "dedicated";
   const canConfirmAdd = newName.trim().length > 0 && resolvedControl.length > 0;
 
   return (
@@ -186,6 +186,9 @@ export function MachineTab() {
             </p>
           </Section>
           <Section title="Gripper (through-spindle air)">
+            <p className="hint">
+              Haas through-tool air blast: <b>M73</b> on (gripper close), <b>M74</b> off (gripper open).
+            </p>
             <TextField label="Gripper close" value={machine.mcodes.gripperClose} onChange={(v) => upd((m) => (m.mcodes.gripperClose = v))} />
             <TextField label="Gripper open" value={machine.mcodes.gripperOpen} onChange={(v) => upd((m) => (m.mcodes.gripperOpen = v))} />
             <NumField label="Gripper tool number" value={machine.gripperTool} step={1} onChange={(v) => upd((m) => (m.gripperTool = Math.round(v)))} />
@@ -217,22 +220,49 @@ export function MachineTab() {
         </div>
         <div className="col">
           <Section title="Flipper (QuickFlip180)">
-            <TextField label="Rotate CW" value={machine.mcodes.flipCW} onChange={(v) => upd((m) => (m.mcodes.flipCW = v))} />
-            <TextField label="Rotate CCW" value={machine.mcodes.flipCCW} onChange={(v) => upd((m) => (m.mcodes.flipCCW = v))} />
             <SelectField
-              label="Flipper grip air supply"
-              value={machine.mcodes.flipGripMode}
+              label="Rotation air supply"
+              value={machine.mcodes.flipRotateMode}
+              title="Which air circuit rotates the flipper"
               options={[
                 { value: "dedicated", label: "Own solenoid / M-codes" },
                 { value: "shared-vise1", label: "Teed to Vise 1 line" },
+                { value: "shared-vise2", label: "Teed to Vise 2 line" },
+              ]}
+              onChange={(v) => upd((m) => (m.mcodes.flipRotateMode = v))}
+            />
+            {machine.mcodes.flipRotateMode === "dedicated" ? (
+              <>
+                <TextField label="Rotate CW" value={machine.mcodes.flipCW} onChange={(v) => upd((m) => (m.mcodes.flipCW = v))} />
+                <TextField label="Rotate CCW" value={machine.mcodes.flipCCW} onChange={(v) => upd((m) => (m.mcodes.flipCCW = v))} />
+              </>
+            ) : (
+              <p className="hint">
+                Rotation shares the {machine.mcodes.flipRotateMode === "shared-vise1" ? "Vise 1" : "Vise 2"} air
+                lines: <b>{machine.mcodes.flipRotateMode === "shared-vise1" ? machine.mcodes.vise1Close : machine.mcodes.vise2Close}</b>{" "}
+                rotates CW (and clamps the vise), <b>{machine.mcodes.flipRotateMode === "shared-vise1" ? machine.mcodes.vise1Open : machine.mcodes.vise2Open}</b>{" "}
+                rotates CCW (and opens the vise). The generator uses those codes for the flip moves.
+              </p>
+            )}
+            <SelectField
+              label="Flipper grip air supply"
+              value={machine.mcodes.flipGripMode}
+              title="Which air circuit drives the flipper grip fingers"
+              options={[
+                { value: "dedicated", label: "Own solenoid / M-codes" },
+                { value: "shared-vise1", label: "Teed to Vise 1 line" },
+                { value: "shared-vise2", label: "Teed to Vise 2 line" },
               ]}
               onChange={(v) => upd((m) => (m.mcodes.flipGripMode = v))}
             />
             {teed ? (
               <p className="hint">
-                The flipper grip fingers share the Vise 1 air lines: <b>{machine.mcodes.vise1Close}</b> clamps
-                both, <b>{machine.mcodes.vise1Open}</b> releases both. The program generator sequences the cycle
-                around this and re-clamps Vise 1 after unloading the flipper.
+                The flipper grip fingers share the{" "}
+                {machine.mcodes.flipGripMode === "shared-vise1" ? "Vise 1" : "Vise 2"} air lines:{" "}
+                <b>{machine.mcodes.flipGripMode === "shared-vise1" ? machine.mcodes.vise1Close : machine.mcodes.vise2Close}</b>{" "}
+                clamps both, <b>{machine.mcodes.flipGripMode === "shared-vise1" ? machine.mcodes.vise1Open : machine.mcodes.vise2Open}</b>{" "}
+                releases both. The program generator sequences the cycle around this and re-clamps the vise
+                after unloading the flipper.
               </p>
             ) : (
               <>
@@ -244,6 +274,12 @@ export function MachineTab() {
                 </p>
               </>
             )}
+            {machine.mcodes.flipGripMode !== "dedicated" &&
+              machine.mcodes.flipGripMode === machine.mcodes.flipRotateMode && (
+                <div className="warnbox bad">
+                  Grip and rotation cannot both be teed to the same vise line - one circuit cannot drive both.
+                </div>
+              )}
           </Section>
           <Section title="Chip Fan">
             <CheckField
@@ -260,19 +296,86 @@ export function MachineTab() {
                 : "Off - no chip fan wash is inserted. The wash program itself is editable in the Program Builder's Chip Fan section."}
             </p>
           </Section>
+          <Section title="Actuation Delays (G04)">
+            <p className="hint">
+              Dwell times in <b>milliseconds</b> inserted around each air actuation so the air has time to
+              act (Haas: integer G04 P = milliseconds, so P4000 = 4 seconds). Before = after reaching
+              position, before actuating; After = after actuating, before moving away.
+            </p>
+            <table className="data delay-table">
+              <thead>
+                <tr>
+                  <th>Device</th>
+                  <th>Before (ms)</th>
+                  <th>After (ms)</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(
+                  [
+                    { label: "Spindle gripper", before: "gripperBefore", after: "gripperAfter" },
+                    { label: "Vise 1", before: "vise1Before", after: "vise1After" },
+                    { label: "Vise 2", before: "vise2Before", after: "vise2After" },
+                    { label: "Flipper grip", before: "flipGripBefore", after: "flipGripAfter" },
+                    { label: "Flipper rotation", before: null, after: "flipRotateAfter" },
+                  ] as { label: string; before: keyof DelayConfig | null; after: keyof DelayConfig }[]
+                ).map((row) => (
+                  <tr key={row.label}>
+                    <td>{row.label}</td>
+                    <td className="num">
+                      {row.before ? (
+                        <input
+                          type="number"
+                          min={0}
+                          step={100}
+                          value={machine.delays[row.before]}
+                          onChange={(e) => {
+                            const v = Math.max(0, Math.round(parseFloat(e.target.value) || 0));
+                            const key = row.before as keyof DelayConfig;
+                            upd((m) => (m.delays[key] = v));
+                          }}
+                        />
+                      ) : (
+                        <span className="hint">-</span>
+                      )}
+                    </td>
+                    <td className="num">
+                      <input
+                        type="number"
+                        min={0}
+                        step={100}
+                        value={machine.delays[row.after]}
+                        onChange={(e) => {
+                          const v = Math.max(0, Math.round(parseFloat(e.target.value) || 0));
+                          upd((m) => (m.delays[row.after] = v));
+                        }}
+                      />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+            <p className="hint">
+              Emitted as G04 P lines via the {"{D_*}"} tokens in the macro templates; 0 skips the dwell.
+            </p>
+          </Section>
           <Section title="Default Feeds">
             <NumField label="Positioning feed" value={machine.positionFeed} step={10} unit="ipm" onChange={(v) => upd((m) => (m.positionFeed = v))} />
             <NumField label="Approach feed" value={machine.approachFeed} step={10} unit="ipm" onChange={(v) => upd((m) => (m.approachFeed = v))} />
             <NumField label="Insert / grip feed" value={machine.insertFeed} step={5} unit="ipm" onChange={(v) => upd((m) => (m.insertFeed = v))} />
           </Section>
           <div className="warnbox">
-            Air circuit summary: vise 1 and vise 2 each on a two-way solenoid
-            ({machine.mcodes.vise1Close}/{machine.mcodes.vise1Open} and {machine.mcodes.vise2Close}/
-            {machine.mcodes.vise2Open}), flipper grip{" "}
+            Air circuit summary: gripper on {machine.mcodes.gripperClose}/{machine.mcodes.gripperOpen}, vise 1
+            and vise 2 each on a two-way solenoid ({machine.mcodes.vise1Close}/{machine.mcodes.vise1Open} and{" "}
+            {machine.mcodes.vise2Close}/{machine.mcodes.vise2Open}), flipper grip{" "}
             {teed
-              ? `teed to the vise 1 line`
+              ? `teed to the ${machine.mcodes.flipGripMode === "shared-vise1" ? "vise 1" : "vise 2"} line`
               : `on the one-way solenoid ${machine.mcodes.flipGripClose} on / ${machine.mcodes.flipGripOpen} off`}
-            , flipper rotation on {machine.mcodes.flipCW} / {machine.mcodes.flipCCW}.
+            , flipper rotation{" "}
+            {machine.mcodes.flipRotateMode === "dedicated"
+              ? `on ${machine.mcodes.flipCW} / ${machine.mcodes.flipCCW}`
+              : `teed to the ${machine.mcodes.flipRotateMode === "shared-vise1" ? "vise 1" : "vise 2"} line`}
+            .
           </div>
         </div>
       </div>

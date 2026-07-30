@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type { JobConfig } from "./types";
-import { defaultJob, defaultMachines, defaultModelAlignments, defaultTemplates, JOB_VERSION } from "./defaults";
+import { defaultDelays, defaultJob, defaultMachines, defaultModelAlignments, defaultTemplates, JOB_VERSION } from "./defaults";
+import { autoOffsets } from "./logic/offsets";
 
 /** deep-merge loaded job over defaults so older job files gain new fields */
 function mergeJob(loaded: Partial<JobConfig>): JobConfig {
@@ -47,6 +48,13 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
     m.gripper2Enabled ??= false;
     m.gripper2Tool ??= m.gripperTool;
     m.gripper2H ??= m.gripperH;
+    // v8 -> v9: gripper on through-tool air blast (M73/M74); update machines
+    // still on the old defaults, leave custom codes alone
+    if (m.mcodes.gripperClose === "M55") m.mcodes.gripperClose = "M73";
+    if (m.mcodes.gripperOpen === "M65") m.mcodes.gripperOpen = "M74";
+    // v8 -> v9: flipper rotation air supply mode + actuation delay table
+    m.mcodes.flipRotateMode ??= d?.mcodes.flipRotateMode ?? "dedicated";
+    m.delays ??= defaultDelays();
   }
   // v6 -> v7: tray mount holes can auto-align to T-slots
   merged.trayGen.mountHoleMode ??= "t-slots";
@@ -62,11 +70,16 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
       m.tSlotCount = d.tSlotCount;
     }
   }
-  // v7 -> v8: templates gained {ORIENT_*} and {GRIP2_*} tokens - refresh
-  // stored templates so the new features work (custom edits are replaced;
-  // the Program Builder warns if a needed token is missing afterwards)
-  if ((loaded.version ?? 1) < 8) {
+  // v7 -> v8: templates gained {ORIENT_*} and {GRIP2_*} tokens;
+  // v8 -> v9: templates gained {D_*} delay tokens - refresh stored templates
+  // so the new features work (custom edits are replaced; the Program Builder
+  // warns if a needed token is missing afterwards)
+  if ((loaded.version ?? 1) < 9) {
     merged.templates = { ...defaultTemplates };
+  }
+  // v8 -> v9: manual offset sheet - seed once from the computed fixture layout
+  if (!loaded.offsets) {
+    merged.offsets = autoOffsets(merged);
   }
   merged.version = JOB_VERSION;
   return merged;

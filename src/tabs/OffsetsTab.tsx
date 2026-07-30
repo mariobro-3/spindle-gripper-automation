@@ -1,27 +1,16 @@
 import { useApp } from "../store";
-import { computeOffsets, fmt, g10Lines, wcsConflicts } from "../logic/offsets";
+import { STATION_INFO, wcsConflicts } from "../logic/offsets";
 import { NumField, Section, SelectField } from "../ui";
-import type { StationKey, WcsCode } from "../types";
-import { downloadText } from "../download";
+import type { WcsCode } from "../types";
 
 const WCS_OPTIONS: { value: WcsCode; label: WcsCode }[] = (["G54", "G55", "G56", "G57", "G58", "G59"] as WcsCode[]).map(
   (w) => ({ value: w, label: w })
 );
 
-const Z_LABELS: Record<StationKey, string> = {
-  vise1: "Vise 1 Z (bottom of stock, clamped)",
-  flipper: "Flipper Z (bottom of part in grip)",
-  vise2: "Vise 2 Z (bottom of part, clamped)",
-  tray: "Tray Z (bottom of first pocket)",
-  finished: "Finished Z (pocket bottom / drop ref)",
-};
-
 export function OffsetsTab() {
   const job = useApp((s) => s.job);
   const update = useApp((s) => s.update);
-  const rows = computeOffsets(job);
   const conflicts = wcsConflicts(job);
-  const g10 = g10Lines(job).join("\n");
 
   return (
     <div className="page narrow">
@@ -30,8 +19,8 @@ export function OffsetsTab() {
         <div className="col">
           <Section title="Base Plate Datum">
             <p className="hint">
-              Probe one point on the base plate and enter its machine coordinates. All vise and flipper offsets
-              are computed from the spacings defined in Fixture Setup.
+              The datum places the whole fixture assembly (plate, vises, flipper) on the bed in the 3D
+              viewer. Pick which point of the plate you reference and where it sits in machine coordinates.
             </p>
             <SelectField
               label="Datum reference point"
@@ -56,30 +45,19 @@ export function OffsetsTab() {
               onChange={(v) => update((j) => (j.datum.rotation = v))}
             />
             <p className="hint">
-              Rotation orients the whole fixture assembly on the bed, pivoting at the datum point. All
-              station offsets below follow it automatically.
+              Work offset coordinates are typed directly into the Offset Sheet on the Fixture Setup page.
             </p>
           </Section>
-          <Section title="Station Z Values (probed)">
-            <p className="hint">Z values are probed individually per Gimbel's procedure and entered here for the offset sheet.</p>
-            {(Object.keys(Z_LABELS) as StationKey[]).map((k) => (
-              <NumField
-                key={k}
-                label={Z_LABELS[k]}
-                value={job.datum.zValues[k]}
-                unit="in"
-                onChange={(v) => update((j) => (j.datum.zValues[k] = v))}
-              />
-            ))}
-          </Section>
+        </div>
+        <div className="col">
           <Section title="WCS Assignments">
-            {rows.map((r) => (
+            {STATION_INFO.map((info) => (
               <SelectField
-                key={r.station}
-                label={r.label}
-                value={job.wcs[r.station]}
+                key={info.station}
+                label={info.label}
+                value={job.wcs[info.station]}
                 options={WCS_OPTIONS}
-                onChange={(v) => update((j) => (j.wcs[r.station] = v))}
+                onChange={(v) => update((j) => (j.wcs[info.station] = v))}
               />
             ))}
             {conflicts.length > 0 && (
@@ -92,59 +70,16 @@ export function OffsetsTab() {
               </div>
             )}
           </Section>
-        </div>
-        <div className="col">
-          <h3>Offset Sheet</h3>
-          <table className="data">
-            <thead>
-              <tr>
-                <th>WCS</th>
-                <th>Station</th>
-                <th>X</th>
-                <th>Y</th>
-                <th>Z</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={r.station}>
-                  <td className="wcs">{r.wcs}</td>
-                  <td title={r.note}>{r.label}</td>
-                  <td className="num">{fmt(r.x)}</td>
-                  <td className="num">{fmt(r.y)}</td>
-                  <td className="num">{fmt(r.z)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <div className="btnrow">
-            <button className="btn" onClick={() => window.print()}>
-              Print offset sheet
-            </button>
-            <button
-              className="btn"
-              onClick={() => {
-                const lines = rows.map((r) => `${r.wcs}\t${r.label}\tX${fmt(r.x)}\tY${fmt(r.y)}\tZ${fmt(r.z)}`);
-                void navigator.clipboard.writeText(lines.join("\n"));
-              }}
-            >
-              Copy table
-            </button>
-          </div>
-          <h3>G10 L2 Program Lines</h3>
-          <p className="hint">
-            Optionally set all work offsets from the program instead of typing them at the control. Enable
-            "Include G10 offset lines" in the Program Builder to embed these automatically.
-          </p>
-          <pre className="code">{g10}</pre>
-          <div className="btnrow">
-            <button className="btn" onClick={() => void navigator.clipboard.writeText(g10)}>
-              Copy G10 lines
-            </button>
-            <button className="btn" onClick={() => downloadText("set-offsets.nc", g10)}>
-              Download .nc
-            </button>
-          </div>
+          <Section title="Spindle Orientation at Each Station">
+            <p className="hint">
+              Gripper jaw direction (M19) at each work offset. Enable/disable and set the tray and finished
+              drop angles in Program Builder &gt; Spindle Orientation -{" "}
+              {job.spindleOrient.enabled ? <b>currently on</b> : <b>currently off</b>}.
+            </p>
+            <NumField label="Vise 1 orient" value={job.spindleOrient.vise1} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.vise1 = v))} />
+            <NumField label="Flipper orient" value={job.spindleOrient.flipper} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.flipper = v))} />
+            <NumField label="Vise 2 orient" value={job.spindleOrient.vise2} step={90} unit="deg" onChange={(v) => update((j) => (j.spindleOrient.vise2 = v))} />
+          </Section>
         </div>
       </div>
     </div>

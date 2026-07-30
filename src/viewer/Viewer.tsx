@@ -5,9 +5,54 @@ import { useApp } from "../store";
 import { machineOf } from "../logic/program";
 import { listCadFiles, cadFileUrl } from "../api";
 import { loadStepMeshes, meshesToGroup } from "./stepLoader";
-import { buildFixtureScene, disposeObject, type LoadedModels } from "./scene";
+import { buildFixtureScene, disposeObject, type LoadedModels, type SimHandles } from "./scene";
 import { createViewCube } from "./viewCube";
+import { buildSimTimeline, stateAt, type SimState, type SimTimeline } from "../logic/simulation";
 import type { ModelKey } from "../types";
+
+const SIM_CLOSED = 0x35d073;
+const SIM_OPEN = 0xffb347;
+
+function applySim(handles: SimHandles, st: SimState) {
+  handles.gripper.visible = true;
+  handles.gripper.position.set(st.gripper.x, st.gripper.y, st.gripper.z);
+  handles.gripper.rotation.z = THREE.MathUtils.degToRad(st.orientDeg);
+  if (handles.flipperPivot) handles.flipperPivot.rotation.y = THREE.MathUtils.degToRad(st.flipDeg);
+  st.parts.forEach((p, i) => {
+    const mesh = handles.parts[i];
+    if (!mesh) return;
+    mesh.visible = true;
+    mesh.position.set(p.x, p.y, p.z);
+  });
+  for (const o of handles.trayStock) o.visible = false;
+  const tint = (mesh: THREE.Mesh, closed: boolean) =>
+    (mesh.material as THREE.MeshBasicMaterial).color.set(closed ? SIM_CLOSED : SIM_OPEN);
+  tint(handles.markers.vise1, st.devices.vise1);
+  tint(handles.markers.vise2, st.devices.vise2);
+  tint(handles.markers.flipper, st.devices.flipGrip);
+  (handles.gripDot.material as THREE.MeshBasicMaterial).color.set(st.devices.gripper ? SIM_CLOSED : SIM_OPEN);
+}
+
+function resetSim(handles: SimHandles) {
+  handles.gripper.visible = false;
+  for (const p of handles.parts) p.visible = false;
+  for (const o of handles.trayStock) o.visible = true;
+  if (handles.flipperPivot) handles.flipperPivot.rotation.y = 0;
+  for (const mesh of [handles.markers.vise1, handles.markers.vise2, handles.markers.flipper]) {
+    (mesh.material as THREE.MeshBasicMaterial).color.set(mesh.userData.baseColor as number);
+  }
+}
+
+interface SimRef {
+  on: boolean;
+  playing: boolean;
+  speed: number;
+  t: number;
+  timeline: SimTimeline | null;
+  lastLabel: string;
+  lastUiT: number;
+  sync: (() => void) | null;
+}
 
 type SlotStatus = "loading" | "ok" | "missing" | "error" | "none";
 type ModelStatus = Record<ModelKey, SlotStatus>;
@@ -52,6 +97,17 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
   });
   const [models, setModels] = useState<LoadedModels>({});
   const job = useApp((s) => s.job);
+  const [, setUiTick] = useState(0);
+  const simRef = useRef<SimRef>({
+    on: false,
+    playing: false,
+    speed: 2,
+    t: 0,
+    timeline: null,
+    lastLabel: "",
+    lastUiT: -1,
+  sync: null,
+  });
 
   // load STEP models per slot; explicit file choices win over keyword auto-detect
   const fileChoices = MODEL_KEYS.map((k) => job.fixture.models[k]?.file ?? "");
@@ -134,9 +190,32 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
 
     const viewCube = createViewCube(cubeMount, camera, controls);
 
+    simRef.current.sync = () => setUiTick((n) => n + 1);
+
     let raf = 0;
+    let last = performance.now();
     const animate = () => {
       raf = requestAnimationFrame(animate);
+      const now = performance.now();
+      const dt = now - last;
+      last = now;
+
+      const sim = simRef.current;
+      const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
+      if (sim.on && sim.timeline && handles) {
+        if (sim.playing) {
+          sim.t = Math.min(sim.timeline.total, sim.t + dt * sim.speed);
+          if (sim.t >= sim.timeline.total) sim.playing = false;
+        }
+        const st = stateAt(sim.timeline, sim.t);
+        applySim(handles, st);
+        if (st.label !== sim.lastLabel || Math.abs(sim.t - sim.lastUiT) > 150) {
+          sim.lastLabel = st.label;
+          sim.lastUiT = sim.t;
+          sim.sync?.();
+        }
+      }
+
       controls.update();
       renderer.render(scene, camera);
       viewCube.update();
@@ -180,6 +259,12 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       const group = buildFixtureScene(job, models);
       sceneGroupRef.current = group;
       scene.add(group);
+      // job changed while simulating: rebuild the timeline against the new job
+      const sim = simRef.current;
+      if (sim.on) {
+        sim.timeline = buildSimTimeline(job);
+        sim.t = Math.min(sim.t, sim.timeline.total);
+      }
     }, 60);
     return () => clearTimeout(timer);
   }, [job, models]);
@@ -197,6 +282,26 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
   const statusLabel = (s: SlotStatus) =>
     s === "ok" ? "loaded" : s === "loading" ? "loading..." : s === "missing" ? "file not found" : "parse error";
 
+  const sim = simRef.current;
+  const toggleSim = () => {
+    if (sim.on) {
+      sim.on = false;
+      sim.playing = false;
+      const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
+      if (handles) resetSim(handles);
+    } else {
+      sim.timeline = buildSimTimeline(job);
+      sim.t = 0;
+      sim.on = true;
+      sim.playing = true;
+    }
+    setUiTick((n) => n + 1);
+  };
+  const fmtClock = (ms: number) => {
+    const s = Math.floor(ms / 1000);
+    return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+  };
+
   return (
     <div className="viewer-wrap">
       <div ref={mountRef} className="viewer-canvas" />
@@ -212,6 +317,52 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
         )}
       </div>
       <div ref={cubeMountRef} className="viewer-cube" />
+      <div className="sim-bar">
+        <button className={`btn ${sim.on ? "danger" : "primary"}`} onClick={toggleSim}>
+          {sim.on ? "Exit Sim" : "Simulate"}
+        </button>
+        {sim.on && sim.timeline && (
+          <>
+            <button
+              className="btn"
+              onClick={() => {
+                if (!sim.playing && sim.t >= sim.timeline!.total) sim.t = 0;
+                sim.playing = !sim.playing;
+                setUiTick((n) => n + 1);
+              }}
+            >
+              {sim.playing ? "Pause" : "Play"}
+            </button>
+            <select
+              value={sim.speed}
+              onChange={(e) => {
+                sim.speed = Number(e.target.value);
+                setUiTick((n) => n + 1);
+              }}
+            >
+              <option value={1}>1x</option>
+              <option value={2}>2x</option>
+              <option value={5}>5x</option>
+              <option value={10}>10x</option>
+            </select>
+            <input
+              type="range"
+              min={0}
+              max={sim.timeline.total}
+              step={100}
+              value={Math.min(sim.t, sim.timeline.total)}
+              onChange={(e) => {
+                sim.t = Number(e.target.value);
+                setUiTick((n) => n + 1);
+              }}
+            />
+            <span className="sim-clock">
+              {fmtClock(sim.t)} / {fmtClock(sim.timeline.total)}
+            </span>
+            <span className="sim-label">{sim.lastLabel}</span>
+          </>
+        )}
+      </div>
       <div className="viewer-legend">
         <span><i className="dot" style={{ background: "#ff5555" }} /> Vise 1 (Op1)</span>
         <span><i className="dot" style={{ background: "#5599ff" }} /> Vise 2 (Op2)</span>

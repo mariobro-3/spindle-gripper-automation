@@ -4,6 +4,7 @@ import type {
   ModelAlignment,
   TemplateKey,
 } from "./types";
+import { autoOffsets } from "./logic/offsets";
 
 function defaultAlignment(): ModelAlignment {
   return { rotX: 0, rotY: 0, rotZ: 0, offX: 0, offY: 0, offZ: 0, visible: true };
@@ -27,9 +28,11 @@ export function defaultModelAlignments() {
 
 /**
  * VF-9SS: Haas NGC Dual Programmable Air kit (see System Diagrams folder) -
- * vises are M70 Pn (clamp) / M71 Pn (unclamp), and the flipper grip fingers
- * are teed to the one-way tool air blast solenoid: M116 on = grip closed,
- * M117 off = grip open.
+ * vises are M70 Pn (clamp) / M71 Pn (unclamp), the gripper runs on the
+ * through-tool air blast (M73 on = close, M74 off = open), the flipper
+ * ROTATION is teed onto the vise 2 circuit (M70 P2 = rotate CW + clamp vise 2,
+ * M71 P2 = rotate CCW + open vise 2), and the flipper grip fingers are on the
+ * one-way tool air blast solenoid: M116 on = grip closed, M117 off = open.
  *
  * Pre-NGC machines default to Gimbel's published example codes (M52/M62 style)
  * until their actual relay assignments are entered.
@@ -37,14 +40,15 @@ export function defaultModelAlignments() {
  */
 function ngcDualAirMcodes() {
   return {
-    gripperClose: "M55",
-    gripperOpen: "M65",
+    gripperClose: "M73",
+    gripperOpen: "M74",
     vise1Close: "M70 P1",
     vise1Open: "M71 P1",
     vise2Close: "M70 P2",
     vise2Open: "M71 P2",
     flipCW: "M64",
     flipCCW: "M54",
+    flipRotateMode: "shared-vise2" as const,
     flipGripMode: "dedicated" as const,
     flipGripClose: "M116",
     flipGripOpen: "M117",
@@ -53,17 +57,33 @@ function ngcDualAirMcodes() {
 
 function gimbelExampleMcodes() {
   return {
-    gripperClose: "M55",
-    gripperOpen: "M65",
+    gripperClose: "M73",
+    gripperOpen: "M74",
     vise1Close: "M62",
     vise1Open: "M52",
     vise2Close: "M63",
     vise2Open: "M53",
     flipCW: "M64",
     flipCCW: "M54",
+    flipRotateMode: "dedicated" as const,
     flipGripMode: "shared-vise1" as const,
     flipGripClose: "M66",
     flipGripOpen: "M56",
+  };
+}
+
+/** default G04 dwell table (milliseconds), matching the original template dwells */
+export function defaultDelays() {
+  return {
+    gripperBefore: 200,
+    gripperAfter: 1000,
+    vise1Before: 200,
+    vise1After: 2000,
+    vise2Before: 200,
+    vise2After: 2000,
+    flipGripBefore: 200,
+    flipGripAfter: 1000,
+    flipRotateAfter: 2500,
   };
 }
 
@@ -79,6 +99,7 @@ const machineBase = {
   positionFeed: 400,
   approachFeed: 250,
   insertFeed: 20,
+  delays: defaultDelays(),
 };
 
 /** Seed a new machine profile from a name + control type (M-codes / bed sized for that control). */
@@ -191,7 +212,7 @@ G43 H{GRIP_H}; (activate gripper height offset)
 G1 Z1.0 F{F_APPR}; (lower to z1.0 above tray z0)
 G1 Z0. F{F_INS}; (lower onto stock in pocket)
 {GRIP_CLOSE}; (close gripper)
-G04 P1.0; (wait one second)
+{D_GRIP_POST}
 G1 Z1. F{F_INS}; (raise part to z1)
 G53 G1 Z0. F{F_POS}; (raise part to machine z0)
 {ORIENT_V1}
@@ -201,11 +222,11 @@ G1 X0. Y0. F{F_POS}; (center gripper over vise 1)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z-0.01 F{F_INS}; (seat stock in vise)
-G04 P0.2; (wait)
+{D_V1_PRE}
 {V1_CLOSE}; (close vise 1)
-G04 P2.0; (wait for vise to close)
+{D_V1_POST}
 {GRIP_OPEN}; (open gripper)
-G04 P0.2; (wait)
+{D_GRIP_POST}
 G1 Z1. F{F_INS}; (move to z1)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
@@ -258,10 +279,10 @@ G1 X0. Y0. F{F_POS}; (center gripper over vise 1)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z{FACE_Z} F{F_INS}; (grip height - compensated for op1 facing)
-G04 P0.2; (wait)
+{D_GRIP_PRE}
 {GRIP_CLOSE}; (close gripper)
 {V1_OPEN}; (open vise 1 - opens flipper grip too if teed)
-G04 P2.0; (wait)
+{D_V1_POST}
 G1 Z1. F{F_INS}; (raise part)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
@@ -274,18 +295,18 @@ G1 X0. Y0. F{F_POS}; (center gripper over flipper nest)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z{FACE_Z} F{F_INS}; (place part in flipper)
-G04 P0.2; (wait)
+{D_FGRIP_PRE}
 {FGRIP_CLOSE}; (close flipper grip)
-G04 P1.0; (wait)
+{D_FGRIP_POST}
 {GRIP_OPEN}; (release gripper)
-G04 P0.2; (wait)
+{D_GRIP_POST}
 G1 Z1. F{F_INS}; (raise clear)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
 
   flipCCW: `N205; (ROTATE FLIPPER CCW - FLIP PART)
 {FLIP_CCW}; (rotate flipper ccw)
-G04 P2.5; (wait for rotation to complete)
+{D_FLIP_POST}
 M99; (return to main program)`,
 
   unloadVise2: `N206; (UNLOAD VISE 2 - GRAB FINISHED PART)
@@ -298,10 +319,10 @@ G1 X0. Y0. F{F_POS}; (center gripper over vise 2)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z0. F{F_INS}; (grip height)
-G04 P0.2; (wait)
+{D_GRIP_PRE}
 {GRIP_CLOSE}; (close gripper)
 {V2_OPEN}; (open vise 2)
-G04 P2.0; (wait)
+{D_V2_POST}
 G1 Z1. F{F_INS}; (raise part)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
@@ -310,7 +331,7 @@ M99; (return to main program)`,
 {ORIENT_FIN}
 G1 Z{DROP_Z} F{F_APPR}; (lower to drop height)
 {GRIP_OPEN}; (release part)
-G04 P1.0; (wait)
+{D_GRIP_POST}
 G53 G0 Z0.; (raise to machine z0)
 M99; (return to main program)`,
 
@@ -324,11 +345,11 @@ G1 X0. Y0. F{F_POS}; (center gripper over flipper nest)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z0. F{F_INS}; (lower to part)
-G04 P0.2; (wait)
+{D_GRIP_PRE}
 {GRIP_CLOSE}; (grab part with gripper)
-G04 P0.5; (wait)
-{FGRIP_OPEN}; (open flipper grip - opens vise 1 too if teed)
-G04 P0.5; (wait)
+{D_GRIP_POST}
+{FGRIP_OPEN}; (open flipper grip - opens teed vise line too)
+{D_FGRIP_POST}
 G1 Z1. F{F_INS}; (raise part clear of flipper)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
@@ -342,20 +363,20 @@ G1 X0. Y0. F{F_POS}; (center gripper over vise 2)
 G1 Z2. F{F_APPR}; (move to z2)
 G1 Z1. F100.; (move to z1)
 G1 Z-0.01 F{F_INS}; (seat part in vise)
-G04 P0.2; (wait)
+{D_V2_PRE}
 {V2_CLOSE}; (close vise 2)
-G04 P2.0; (wait for vise to close)
+{D_V2_POST}
 {GRIP_OPEN}; (open gripper)
-G04 P0.2; (wait)
+{D_GRIP_POST}
 G1 Z1. F{F_INS}; (raise clear)
 G0 G53 Z0.; (rapid to machine z0)
 M99; (return to main program)`,
 
   flipCW: `N209; (ROTATE FLIPPER BACK CW)
 {FLIP_CW}; (rotate flipper cw to home)
-G04 P2.5; (wait for rotation to complete)
+{D_FLIP_POST}
 {V1_CLOSE}; (ensure vise 1 clamped before machining)
-G04 P1.0; (wait for clamp)
+{D_V1_POST}
 M99; (return to main program)`,
 
   ending: `G53 G0 Z0.; (go to z home)
@@ -366,10 +387,10 @@ G53 G0 X0. Y0.; (go to machine home)
 M30; (end program)`,
 };
 
-export const JOB_VERSION = 8;
+export const JOB_VERSION = 9;
 
 export function defaultJob(): JobConfig {
-  return {
+  const job: JobConfig = {
     version: JOB_VERSION,
     name: "Untitled Job",
     machineId: "vf9ss",
@@ -395,6 +416,13 @@ export function defaultJob(): JobConfig {
       zValues: { vise1: -18, tray: -20, vise2: -18, flipper: -16, finished: -20 },
     },
     wcs: { vise1: "G54", tray: "G55", vise2: "G56", flipper: "G57", finished: "G58" },
+    offsets: {
+      vise1: { x: 0, y: 0, z: 0 },
+      tray: { x: 0, y: 0, z: 0 },
+      vise2: { x: 0, y: 0, z: 0 },
+      flipper: { x: 0, y: 0, z: 0 },
+      finished: { x: 0, y: 0, z: 0 },
+    },
     stock: { length: 2.0, width: 2.0, height: 1.0 },
     stockTray: {
       firstPocketX: -35.0,
@@ -447,4 +475,7 @@ export function defaultJob(): JobConfig {
       faceRemovalOp1: 0,
     },
   };
+  // seed the manual offset sheet from the default fixture layout
+  job.offsets = autoOffsets(job);
+  return job;
 }

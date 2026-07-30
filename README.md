@@ -45,9 +45,17 @@ Pick your machine (VF-9SS, VF-3SS, and VF-4SS ship pre-configured) or click
 
 - **Bed size and T-slots** - drawn to scale in the viewer. Haas specs are seeded:
   VF-3SS/VF-4SS 0.63" slots on 3.15" centers (5 slots), VF-9SS on 4.92" centers (7 slots).
-- **M-codes** - gripper open/close, vise 1 / vise 2 open/close, flipper CW/CCW, and the
-  flipper grip air supply. The teed circuit (flipper grip shared with the vise 1 air
-  line) is supported; the generated cycle re-clamps vise 1 at the right moments.
+- **M-codes** - gripper close/open (defaults to the Haas through-tool air blast,
+  M73 on / M74 off), vise 1 / vise 2 close/open, flipper rotation, and flipper grip.
+- **Teed air circuits** - the flipper rotation AND the flipper grip each pick their air
+  supply: own solenoid, teed to vise 1, or teed to vise 2. Example (VF-9SS default):
+  rotation teed to vise 2 means `M70 P2` rotates CW and clamps vise 2 together, `M71 P2`
+  rotates CCW and opens vise 2 - the generator uses those codes for the flip moves and
+  warns if a teed vise would be left unclamped before machining.
+- **Actuation delays (G04)** - a per-machine dwell table in milliseconds (Haas: integer
+  `G04 P` = ms, so P4000 = 4 s) with before/after values for the spindle gripper, each
+  vise, the flipper grip, and the flipper rotation. Emitted into the macros via `{D_*}`
+  tokens; tune them to how fast your air actually actuates.
 - **Gripper and chip fan tool numbers / H offsets**, and default feeds.
 - **Second gripper for Op2** - optional; if the flipped part needs different jaws, gripper 1
   handles raw stock and the op1 part while gripper 2 takes over at the flipper and handles
@@ -71,13 +79,23 @@ and the finished-parts bin. Use the view cube in the corner to snap views.
   There are dedicated soft-jaw slots for vise 1 and vise 2 with full alignment controls.
   In the installed app, uploaded files are kept in
   **Documents\Spindle Gripper Jobs\Custom CAD**.
+- **Offset Sheet** - the work offset table lives right here next to the viewer. Type the
+  machine X/Y/Z for every WCS directly into the table (values are seeded once from the
+  fixture layout, then fully manual). Print it, copy it, or copy/download the `G10 L2`
+  lines.
+- **Simulate** - the button in the viewer's bottom bar runs a kinematic simulation of
+  the whole tray: the gripper travels station to station, picks and places every part,
+  the flipper swings 180, spindle orients rotate the part in the air, and the station
+  rings turn green (clamped) / amber (open). Play/pause, 1-10x speed, and a scrub bar;
+  dwell times come from the machine's delay table.
 
 ### 3. Datum & Offsets
 
-Probe one point on the plate at the machine and type in what the control reads. The app
-computes machine XY for every station from the fixture spacing and rotation. Enter the
-probed Z for each station, assign WCS codes (G54-G59), then print the offset sheet or
-copy the `G10 L2` lines. WCS conflicts are flagged.
+Pick the base plate datum (which corner you reference and where it sits on the bed -
+this places the whole assembly in the 3D viewer), assign WCS codes (G54-G59) per
+station, and set the spindle orient angle for vise 1 / flipper / vise 2. WCS conflicts
+are flagged. The offset coordinates themselves are typed into the Offset Sheet on the
+Fixture Setup page.
 
 ### 4. Trays & Stock
 

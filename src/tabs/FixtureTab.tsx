@@ -3,7 +3,35 @@ import { useApp } from "../store";
 import { Viewer } from "../viewer/Viewer";
 import { NumField, Section, SelectField, CheckField } from "../ui";
 import { listCadFiles, uploadCadFile } from "../api";
-import type { ModelAlignment, ModelKey } from "../types";
+import { computeOffsets, fmt, g10Lines } from "../logic/offsets";
+import { downloadText } from "../download";
+import type { ModelAlignment, ModelKey, StationKey } from "../types";
+
+function OffsetCell({
+  value,
+  onChange,
+}: {
+  value: number;
+  onChange: (v: number) => void;
+}) {
+  const [text, setText] = useState(String(value));
+  useEffect(() => {
+    if (parseFloat(text) !== value) setText(String(value));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [value]);
+  return (
+    <input
+      type="number"
+      step={0.001}
+      value={text}
+      onChange={(e) => {
+        setText(e.target.value);
+        const v = parseFloat(e.target.value);
+        if (!Number.isNaN(v)) onChange(v);
+      }}
+    />
+  );
+}
 
 function AlignmentFields({
   align,
@@ -55,9 +83,12 @@ function ModelFileField({
 }
 
 export function FixtureTab() {
+  const job = useApp((s) => s.job);
   const fixture = useApp((s) => s.job.fixture);
   const datum = useApp((s) => s.job.datum);
   const update = useApp((s) => s.update);
+  const offsetRows = computeOffsets(job);
+  const g10 = g10Lines(job).join("\n");
 
   const [cadFiles, setCadFiles] = useState<string[]>([]);
   const [uploadMsg, setUploadMsg] = useState("");
@@ -111,6 +142,58 @@ export function FixtureTab() {
             These are the same datum values as on the Datum &amp; Offsets page, and all work offsets follow
             the rotation automatically.
           </p>
+        </Section>
+        <Section title="Offset Sheet">
+          <p className="hint">
+            Machine coordinates for every work offset - type them in directly (WCS codes are assigned on the
+            Datum &amp; Offsets page).
+          </p>
+          <table className="data offset-sheet">
+            <thead>
+              <tr>
+                <th>WCS</th>
+                <th>Station</th>
+                <th>X</th>
+                <th>Y</th>
+                <th>Z</th>
+              </tr>
+            </thead>
+            <tbody>
+              {offsetRows.map((r) => {
+                const set = (axis: "x" | "y" | "z") => (v: number) =>
+                  update((j) => (j.offsets[r.station as StationKey][axis] = v));
+                return (
+                  <tr key={r.station}>
+                    <td className="wcs">{r.wcs}</td>
+                    <td title={r.note}>{r.label}</td>
+                    <td className="num"><OffsetCell value={r.x} onChange={set("x")} /></td>
+                    <td className="num"><OffsetCell value={r.y} onChange={set("y")} /></td>
+                    <td className="num"><OffsetCell value={r.z} onChange={set("z")} /></td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+          <div className="btnrow">
+            <button className="btn" onClick={() => window.print()}>
+              Print offset sheet
+            </button>
+            <button
+              className="btn"
+              onClick={() => {
+                const lines = offsetRows.map((r) => `${r.wcs}\t${r.label}\tX${fmt(r.x)}\tY${fmt(r.y)}\tZ${fmt(r.z)}`);
+                void navigator.clipboard.writeText(lines.join("\n"));
+              }}
+            >
+              Copy table
+            </button>
+            <button className="btn" onClick={() => void navigator.clipboard.writeText(g10)} title={g10}>
+              Copy G10 lines
+            </button>
+            <button className="btn" onClick={() => downloadText("set-offsets.nc", g10)}>
+              Download G10 .nc
+            </button>
+          </div>
         </Section>
         <Section title="Base Plate">
           <NumField label="Length (X)" value={fixture.plateLength} unit="in" onChange={(v) => update((j) => (j.fixture.plateLength = v))} />
