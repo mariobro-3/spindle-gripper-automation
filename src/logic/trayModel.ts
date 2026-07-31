@@ -10,6 +10,10 @@ export interface TrayGeometry {
   pocketDepth: number;
   cornerRadius: number;
   outerCornerRadius: number;
+  /** over-round corner relief diameter; 0 = disabled. One circle is cut at
+   *  each pocket corner, centered on the sharp corner point, so the profile
+   *  cutter runs out into the corner by its radius. */
+  cornerReliefDia: number;
   /** pocket centers, tray-local, origin at tray bottom-left corner */
   pockets: { cx: number; cy: number; index: number }[];
   /** mounting hole centers */
@@ -23,8 +27,8 @@ export function buildTrayGeometry(
   gen: TrayGenConfig,
   machine?: Pick<MachineProfile, "bedWidth" | "tSlotCount" | "tSlotSpacing" | "tSlotWidth">
 ): TrayGeometry {
-  const pocketLength = stock.length + 2 * gen.pocketClearance;
-  const pocketWidth = stock.width + 2 * gen.pocketClearance;
+  const pocketLength = stock.length + 2 * gen.pocketClearanceX;
+  const pocketWidth = stock.width + 2 * gen.pocketClearanceY;
 
   const spanX = (tray.countX - 1) * tray.pitchX + pocketLength;
   const spanY = (tray.countY - 1) * tray.pitchY + pocketWidth;
@@ -66,6 +70,10 @@ export function buildTrayGeometry(
   }
 
   const maxPocketRadius = Math.min(pocketLength, pocketWidth) / 2 - 0.001;
+  // over-round: the profile cutter (overRoundDia) leaves its own radius in the
+  // corners and runs out past the sharp corner point by that radius
+  const reliefDia = gen.overRound ? Math.max(0.001, gen.overRoundDia) : 0;
+  const cornerRadius = gen.overRound ? reliefDia / 2 : gen.cornerRadius;
   return {
     outerLength,
     outerWidth,
@@ -73,7 +81,8 @@ export function buildTrayGeometry(
     pocketLength,
     pocketWidth,
     pocketDepth: Math.min(gen.pocketDepth, gen.thickness),
-    cornerRadius: Math.max(0, Math.min(gen.cornerRadius, maxPocketRadius)),
+    cornerRadius: Math.max(0, Math.min(cornerRadius, maxPocketRadius)),
+    cornerReliefDia: Math.min(reliefDia, maxPocketRadius * 2),
     outerCornerRadius: Math.max(0, Math.min(gen.outerCornerRadius, Math.min(outerLength, outerWidth) / 2 - 0.001)),
     pockets,
     holes,

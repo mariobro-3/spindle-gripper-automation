@@ -47,26 +47,31 @@ const RAPID_IPS = 22; // in/s XY travel
 const PLUNGE_IPS = 7; // in/s Z plunge/retract
 const MIN_MOVE_MS = 120;
 
-/** grip plane heights derived from the picked jaw/finger bodies in the scene */
-export interface SimHeights {
-  /** top surface of the vise jaws (part center rides here) */
-  vise?: number | null;
-  /** center between the flipper grip fingers */
-  flipper?: number | null;
+/** grip points (relative to each station point) derived from the picked
+ *  jaw/finger bodies in the scene - X/Y matter because the jaws/fingers can
+ *  sit well off the model's center (e.g. flipper fingers ahead of the body) */
+export interface SimGripPoints {
+  /** vise jaw center XY, at the jaw top Z (part center rides here) */
+  vise?: { x: number; y: number; z: number } | null;
+  /** the point centered between the flipper grip fingers */
+  flipper?: { x: number; y: number; z: number } | null;
 }
 
-export function buildSimTimeline(job: JobConfig, heights?: SimHeights): SimTimeline {
+export function buildSimTimeline(job: JobConfig, grips?: SimGripPoints): SimTimeline {
   const m = machineOf(job);
   const d = m.delays;
   const so = job.spindleOrient;
   const fx = job.fixture;
   const h = job.stock.height;
-  const visePartZ = heights?.vise ?? VISE_PART_Z;
-  const flipPartZ = heights?.flipper ?? FLIP_PART_Z;
+  const vg = grips?.vise ?? null;
+  const fg = grips?.flipper ?? null;
+  const visePartZ = vg?.z ?? VISE_PART_Z;
+  const flipPartZ = fg?.z ?? FLIP_PART_Z;
 
-  const v1 = plateToMachine(job, fx.vise1X, fx.vise1Y);
-  const v2 = plateToMachine(job, fx.vise2X, fx.vise2Y);
-  const fl = plateToMachine(job, fx.flipperX, fx.flipperY);
+  // pick/place targets = station point + grip point offset (plate-local)
+  const v1 = plateToMachine(job, fx.vise1X + (vg?.x ?? 0), fx.vise1Y + (vg?.y ?? 0));
+  const v2 = plateToMachine(job, fx.vise2X + (vg?.x ?? 0), fx.vise2Y + (vg?.y ?? 0));
+  const fl = plateToMachine(job, fx.flipperX + (fg?.x ?? 0), fx.flipperY + (fg?.y ?? 0));
   const tableZ = -fx.plateThickness;
   const trayPartZ = tableZ + job.trayGen.thickness - job.trayGen.pocketDepth + h / 2;
 

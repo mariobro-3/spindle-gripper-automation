@@ -36,8 +36,10 @@ export interface SimHandles {
   trayStock: THREE.Object3D[];
   /** model instances that body-pick clicks raycast against */
   pickGroups: Record<PickableModel, THREE.Group[]>;
-  /** grip plane heights above the plate, derived from the picked jaw/finger bodies */
-  gripHeights: { vise: number | null; flipper: number | null };
+  /** grip points relative to the station point (wrapper-local), derived from
+   *  the picked jaw/finger bodies: vise = jaw center XY at jaw top Z,
+   *  flipper = the point centered between the fingers */
+  gripPoints: { vise: Vec3 | null; flipper: Vec3 | null };
 }
 
 /** height of the flipper rotation axis above the plate top (viewer approximation) */
@@ -71,8 +73,8 @@ const matBin = new THREE.MeshStandardMaterial({
  *
  * Articulation body picks NEVER move the model - the picked jaw/finger bodies
  * just record the grip plane so the simulation knows where parts sit:
- * userData.gripTopZ (top surface of the jaws) and userData.gripCenterZ
- * (center between the fingers).
+ * userData.gripTop (jaw center XY at jaw top Z) and userData.gripCenter
+ * (the point centered between the fingers).
  */
 function applyAlignment(model: THREE.Group, align: ModelAlignment, scale: number): THREE.Group {
   const wrapper = new THREE.Group();
@@ -116,12 +118,40 @@ function applyAlignment(model: THREE.Group, align: ModelAlignment, scale: number
     }
 
     if (!jb.isEmpty()) {
-      wrapper.userData.gripTopZ = jb.max.z + inner.position.z;
-      wrapper.userData.gripCenterZ = jb.getCenter(new THREE.Vector3()).z + inner.position.z;
+      // full grip point (wrapper-local, i.e. relative to the station point) -
+      // the simulation targets this so parts seat between the jaws/fingers
+      // even when they are offset from the model's center
+      const jc = jb.getCenter(new THREE.Vector3()).add(inner.position);
+      wrapper.userData.gripTop = { x: jc.x, y: jc.y, z: jb.max.z + inner.position.z };
+      wrapper.userData.gripCenter = { x: jc.x, y: jc.y, z: jc.z };
     }
   }
   wrapper.userData.alignedInner = inner;
   return wrapper;
+}
+
+/**
+ * Visible marker for a model's picked datum point. The datum always sits at
+ * (offX, offY, offZ) in wrapper space (see applyAlignment), so the marker
+ * makes "Pick corner" / "Center on jaws/fingers" results visible. Drawn on
+ * top of the model (no depth test) and invisible to body-pick raycasts.
+ */
+function modelDatumMarker(align: ModelAlignment): THREE.Object3D {
+  const g = new THREE.Group();
+  const dot = new THREE.Mesh(
+    new THREE.SphereGeometry(0.1, 12, 12),
+    new THREE.MeshBasicMaterial({ color: 0x00e5ff, depthTest: false })
+  );
+  dot.renderOrder = 20;
+  const axes = new THREE.AxesHelper(0.7);
+  (axes.material as THREE.Material).depthTest = false;
+  axes.renderOrder = 20;
+  g.add(dot, axes);
+  g.traverse((o) => {
+    o.raycast = () => {};
+  });
+  g.position.set(align.offX, align.offY, align.offZ);
+  return g;
 }
 
 /**
@@ -395,7 +425,7 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
   let vise1Art: ArticulationHandles | null = null;
   let vise2Art: ArticulationHandles | null = null;
   const pickGroups: SimHandles["pickGroups"] = { vise: [], flipper: [], gripper: [] };
-  const gripHeights: SimHandles["gripHeights"] = { vise: null, flipper: null };
+  const gripPoints: SimHandles["gripPoints"] = { vise: null, flipper: null };
 
   for (const s of stations) {
     let obj: THREE.Group;
@@ -404,14 +434,15 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
       obj = applyAlignment(s.model, s.align, stepScale);
       art = articulate(obj, s.align.sim, stepScale);
       pickGroups[s.key === "flipper" ? "flipper" : "vise"].push(obj);
-      // grip plane from the picked jaws: vise datum = top of jaws, flipper
-      // nest = center between the fingers
-      if (s.key !== "flipper" && typeof obj.userData.gripTopZ === "number") {
-        gripHeights.vise = obj.userData.gripTopZ;
+      // grip point from the picked jaws: vise = jaw center at jaw top,
+      // flipper nest = the point centered between the fingers
+      if (s.key !== "flipper" && obj.userData.gripTop) {
+        gripPoints.vise = obj.userData.gripTop as Vec3;
       }
-      if (s.key === "flipper" && typeof obj.userData.gripCenterZ === "number") {
-        gripHeights.flipper = obj.userData.gripCenterZ;
+      if (s.key === "flipper" && obj.userData.gripCenter) {
+        gripPoints.flipper = obj.userData.gripCenter as Vec3;
       }
+      if (s.align.datum) obj.add(modelDatumMarker(s.align));
     } else if (s.align.visible) {
       obj = fallbackBox(...s.fallback, matFallback);
     } else {
@@ -463,6 +494,7 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
   if (models.gripper && fx.models.gripper.visible) {
     const grip = applyAlignment(models.gripper, fx.models.gripper, stepScale);
     grip.position.set(fx.flipperX, fx.flipperY, 7);
+    if (fx.models.gripper.datum) grip.add(modelDatumMarker(fx.models.gripper));
     assembly.add(grip);
   }
 
@@ -582,7 +614,7 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
     markers,
     trayStock,
     pickGroups,
-    gripHeights,
+    gripPoints,
   };
   root.userData.simHandles = handles;
 

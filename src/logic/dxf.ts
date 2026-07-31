@@ -72,6 +72,21 @@ export function trayToDxf(g: TrayGeometry): string {
         "POCKETS"
       )
     );
+    if (g.cornerReliefDia > 0) {
+      // over-round corner relief circles, centered on the sharp corner points
+      for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+          e.push(
+            ...circle(
+              p.cx + (sx * g.pocketLength) / 2,
+              p.cy + (sy * g.pocketWidth) / 2,
+              g.cornerReliefDia / 2,
+              "POCKETS"
+            )
+          );
+        }
+      }
+    }
   }
 
   for (const h of g.holes) {

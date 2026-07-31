@@ -161,11 +161,24 @@ export function TrayGenTab() {
             </p>
           </Section>
           <Section title="Tray Parameters">
-            <NumField label="Pocket clearance (per side)" value={g.pocketClearance} step={0.005} unit="in" onChange={(v) => update((j) => (j.trayGen.pocketClearance = v))} />
+            <NumField label="Pocket clearance X (per side)" value={g.pocketClearanceX} step={0.005} unit="in" onChange={(v) => update((j) => (j.trayGen.pocketClearanceX = v))} />
+            <NumField label="Pocket clearance Y (per side)" value={g.pocketClearanceY} step={0.005} unit="in" onChange={(v) => update((j) => (j.trayGen.pocketClearanceY = v))} />
             <NumField label="Pocket depth" value={g.pocketDepth} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.pocketDepth = v))} />
             <NumField label="Tray thickness" value={g.thickness} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.thickness = v))} />
             <NumField label="Edge margin" value={g.margin} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.margin = v))} />
-            <NumField label="Pocket corner radius" value={g.cornerRadius} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.cornerRadius = v))} />
+            <CheckField label="Over-round pocket corners" value={g.overRound} onChange={(v) => update((j) => (j.trayGen.overRound = v))} />
+            {g.overRound ? (
+              <>
+                <NumField label="Over-round cutter dia" value={g.overRoundDia} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.overRoundDia = v))} />
+                <p className="hint">
+                  The profile cutter runs out into each pocket corner by its radius, so square stock corners seat
+                  fully. Corner geometry comes from the cutter: {fmt(g.overRoundDia / 2)}&quot; radius corners plus
+                  a {fmt(g.overRoundDia)}&quot; dia relief circle centered on each sharp corner point.
+                </p>
+              </>
+            ) : (
+              <NumField label="Pocket corner radius" value={g.cornerRadius} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.cornerRadius = v))} />
+            )}
             <NumField label="Outer corner radius" value={g.outerCornerRadius} step={0.0625} unit="in" onChange={(v) => update((j) => (j.trayGen.outerCornerRadius = v))} />
             <CheckField label="Mounting holes" value={g.mountHoles} onChange={(v) => update((j) => (j.trayGen.mountHoles = v))} />
             {g.mountHoles && (

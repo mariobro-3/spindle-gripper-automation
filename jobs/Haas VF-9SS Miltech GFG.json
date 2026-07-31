@@ -1,5 +1,5 @@
 {
-  "version": 9,
+  "version": 10,
   "name": "Haas VF-9SS Miltech GFG",
   "machineId": "vf9ss",
   "machines": [
@@ -158,18 +158,35 @@
         "rotX": 90,
         "rotY": 0,
         "rotZ": 0,
-        "offX": 0,
-        "offY": 0,
-        "offZ": 0,
-        "visible": true
+        "offX": -2.9134,
+        "offY": 2.5394,
+        "offZ": 4.9409,
+        "visible": true,
+        "sim": {
+          "rotating": [],
+          "rotAxis": "x",
+          "jawA": [
+            8
+          ],
+          "jawATravel": 0.25,
+          "jawB": [
+            7
+          ],
+          "jawBTravel": 0.25
+        },
+        "datum": {
+          "x": -74,
+          "y": 125.5,
+          "z": -64.5
+        }
       },
       "flipper": {
         "rotX": 90,
         "rotY": 0,
         "rotZ": 90,
         "offX": 0,
-        "offY": 0,
-        "offZ": 0,
+        "offY": 4.1362,
+        "offZ": 2.6451,
         "visible": true,
         "sim": {
           "rotating": [
@@ -180,20 +197,17 @@
             22,
             0
           ],
-          "jawAOpen": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-          },
           "jawB": [
             23,
             1
           ],
-          "jawBOpen": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-          }
+          "jawATravel": 0.2,
+          "jawBTravel": 0.2
+        },
+        "datum": {
+          "x": 142.7255,
+          "y": 74.5541,
+          "z": 0
         }
       },
       "gripper": {
@@ -209,26 +223,18 @@
           "rotAxis": "x",
           "jawA": [
             12,
-            3,
             14,
-            16
+            16,
+            3
           ],
-          "jawAOpen": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-          },
           "jawB": [
             4,
-            9,
             7,
-            0
+            0,
+            9
           ],
-          "jawBOpen": {
-            "x": 0,
-            "y": 0,
-            "z": 0
-          }
+          "jawATravel": 0.25,
+          "jawBTravel": 0.25
         }
       },
       "jaws1": {
@@ -339,11 +345,14 @@
     "finished": 0
   },
   "trayGen": {
-    "pocketClearance": 0.01,
+    "pocketClearanceX": 0.01,
+    "pocketClearanceY": 0.01,
     "pocketDepth": 0.375,
     "thickness": 0.5,
     "margin": 0.5,
     "cornerRadius": 0.125,
+    "overRound": true,
+    "overRoundDia": 0.25,
     "outerCornerRadius": 0.25,
     "mountHoles": true,
     "mountHoleMode": "t-slots",

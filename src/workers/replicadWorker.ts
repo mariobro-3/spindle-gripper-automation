@@ -51,6 +51,24 @@ function buildTray(g: TrayGeometry): Shape3D {
       .extrude(g.pocketDepth + 0.05)
       .translate([ox + p.cx, oy + p.cy, 0]) as Shape3D;
     solid = solid.cut(pocket);
+
+    if (g.cornerReliefDia > 0) {
+      // over-round relief: a circle centered on each sharp corner point,
+      // matching the profile cutter running out into the corner by its radius
+      for (const sx of [-1, 1]) {
+        for (const sy of [-1, 1]) {
+          const relief = drawCircle(g.cornerReliefDia / 2)
+            .sketchOnPlane("XY", g.thickness - g.pocketDepth)
+            .extrude(g.pocketDepth + 0.05)
+            .translate([
+              ox + p.cx + (sx * g.pocketLength) / 2,
+              oy + p.cy + (sy * g.pocketWidth) / 2,
+              0,
+            ]) as Shape3D;
+          solid = solid.cut(relief);
+        }
+      }
+    }
   }
 
   for (const h of g.holes) {

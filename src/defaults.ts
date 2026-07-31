@@ -398,7 +398,7 @@ G53 G0 X0. Y0.; (go to machine home)
 M30; (end program)`,
 };
 
-export const JOB_VERSION = 9;
+export const JOB_VERSION = 10;
 
 export function defaultJob(): JobConfig {
   const job: JobConfig = {
@@ -464,11 +464,14 @@ export function defaultJob(): JobConfig {
       finished: 0,
     },
     trayGen: {
-      pocketClearance: 0.01,
+      pocketClearanceX: 0.01,
+      pocketClearanceY: 0.01,
       pocketDepth: 0.375,
       thickness: 0.5,
       margin: 0.5,
       cornerRadius: 0.125,
+      overRound: false,
+      overRoundDia: 0.125,
       outerCornerRadius: 0.25,
       mountHoles: true,
       mountHoleMode: "t-slots",

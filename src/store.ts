@@ -78,6 +78,14 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
   }
   // v6 -> v7: tray mount holes can auto-align to T-slots
   merged.trayGen.mountHoleMode ??= "t-slots";
+  // v9 -> v10: pocket clearance split into X/Y (over-round fields come from
+  // defaults via the merge) - carry a legacy single clearance into both axes
+  const loadedGen = loaded.trayGen as (Partial<JobConfig["trayGen"]> & { pocketClearance?: number }) | undefined;
+  if (typeof loadedGen?.pocketClearance === "number") {
+    if (loadedGen.pocketClearanceX === undefined) merged.trayGen.pocketClearanceX = loadedGen.pocketClearance;
+    if (loadedGen.pocketClearanceY === undefined) merged.trayGen.pocketClearanceY = loadedGen.pocketClearance;
+  }
+  delete (merged.trayGen as unknown as Record<string, unknown>).pocketClearance;
   // Refresh built-in Haas table/T-slot dims when upgrading from pre-v7
   if ((loaded.version ?? 1) < 7) {
     for (const m of merged.machines) {

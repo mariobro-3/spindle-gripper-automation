@@ -201,11 +201,16 @@ export interface FinishedConfig {
 }
 
 export interface TrayGenConfig {
-  pocketClearance: number; // added around stock on each side
+  pocketClearanceX: number; // added to stock length on each side (X)
+  pocketClearanceY: number; // added to stock width on each side (Y)
   pocketDepth: number;
   thickness: number;
   margin: number; // material around outer pockets
   cornerRadius: number; // pocket corner radius
+  /** over-round (corner relief): the profile cutter runs out into each pocket
+   *  corner so square stock corners seat fully */
+  overRound: boolean;
+  overRoundDia: number; // relief cutter diameter
   outerCornerRadius: number;
   mountHoles: boolean;
   /** corners = 4 corner holes; t-slots = holes where the tray overlaps machine T-slots */

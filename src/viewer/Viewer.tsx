@@ -99,22 +99,27 @@ function autoCenterDatum(model: PickTarget["model"], wrapper: THREE.Group) {
   if (!idx.size) return;
   const inner = wrapper.userData.alignedInner as THREE.Group | undefined;
   if (!inner) return;
-  // world-space bounds of the picked bodies (scene is at rest while picking)
-  const box = new THREE.Box3();
+  // bounds of the picked bodies in RAW model coords, straight from geometry -
+  // independent of the current simulation pose (flip angle, jaw travel)
+  const rawBox = new THREE.Box3();
   wrapper.traverse((o) => {
     const m = o as THREE.Mesh;
-    if (m.isMesh && idx.has(m.userData.bodyIndex as number)) box.expandByObject(m);
+    if (!m.isMesh || !idx.has(m.userData.bodyIndex as number) || !m.geometry) return;
+    m.geometry.computeBoundingBox();
+    if (m.geometry.boundingBox) rawBox.union(m.geometry.boundingBox);
   });
-  if (box.isEmpty()) return;
-  const world = box.getCenter(new THREE.Vector3());
-  if (model === "vise") world.z = box.max.z; // vise datum sits on top of the jaws
-  const local = wrapper.worldToLocal(world.clone());
-  // wrapper-local -> RAW model coords: undo the alignment position, rotation, scale
-  const raw = local
-    .clone()
-    .sub(inner.position)
-    .applyQuaternion(new THREE.Quaternion().setFromEuler(inner.rotation).invert())
-    .divideScalar(inner.scale.x || 1);
+  if (rawBox.isEmpty()) return;
+  // raw -> wrapper space via the alignment transform (scale, rotation, position)
+  const alignMatrix = new THREE.Matrix4().compose(
+    inner.position,
+    new THREE.Quaternion().setFromEuler(inner.rotation),
+    inner.scale
+  );
+  const localBox = rawBox.clone().applyMatrix4(alignMatrix);
+  const local = localBox.getCenter(new THREE.Vector3());
+  if (model === "vise") local.z = localBox.max.z; // vise datum sits on top of the jaws
+  // wrapper-local -> RAW model coords: undo the alignment transform
+  const raw = local.clone().applyMatrix4(alignMatrix.clone().invert());
   const r4 = (n: number) => Math.round(n * 10000) / 10000;
   state.update((j) => {
     const a = j.fixture.models[model];
@@ -480,7 +485,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       // job changed while simulating: rebuild the timeline against the new job
       const sim = simRef.current;
       if (sim.on) {
-        sim.timeline = buildSimTimeline(job, handles.gripHeights);
+        sim.timeline = buildSimTimeline(job, handles.gripPoints);
         sim.t = Math.min(sim.t, sim.timeline.total);
       }
     }, 60);
@@ -518,7 +523,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       if (handles) resetSim(handles);
     } else {
       const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
-      sim.timeline = buildSimTimeline(job, handles?.gripHeights);
+      sim.timeline = buildSimTimeline(job, handles?.gripPoints);
       sim.t = 0;
       sim.on = true;
       sim.playing = true;
