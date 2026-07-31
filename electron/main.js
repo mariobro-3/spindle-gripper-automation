@@ -144,6 +144,8 @@ async function handleRequest(req, res) {
       if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return send(404, { error: "not found" });
       res.statusCode = 200;
       res.setHeader("Content-Type", "application/octet-stream");
+      // custom STEP uploads can overwrite a file under the same name
+      res.setHeader("Cache-Control", "no-cache");
       fs.createReadStream(file).pipe(res);
       return;
     }
@@ -154,20 +156,37 @@ async function handleRequest(req, res) {
     if (rel === "/") rel = "/index.html";
     let file = path.join(DIST_DIR, rel);
     if (!fs.existsSync(file) || !fs.statSync(file).isFile()) {
+      // hashed bundle files must 404 when missing (a stale cached page must
+      // fail loudly instead of receiving index.html as JavaScript)
+      if (rel.startsWith("/assets/")) return send(404, { error: "not found" }, "text/plain");
       file = path.join(DIST_DIR, "index.html");
     }
     res.statusCode = 200;
     res.setHeader("Content-Type", MIME[path.extname(file).toLowerCase()] ?? "application/octet-stream");
+    // Vite asset filenames are content-hashed -> cache forever; everything
+    // else (index.html) must be revalidated so app updates take effect
+    res.setHeader(
+      "Cache-Control",
+      rel.startsWith("/assets/") ? "public, max-age=31536000, immutable" : "no-cache"
+    );
     fs.createReadStream(file).pipe(res);
   } catch (err) {
     send(500, { error: String(err) });
   }
 }
 
+// Fixed port so the app origin (http://127.0.0.1:PORT) is stable across
+// launches - localStorage (the in-app autosave) is keyed by origin and would
+// be lost every launch on a random port. Falls back to a random port if taken.
+const APP_PORT = 17321;
+
 function startServer() {
   return new Promise((resolve) => {
     const server = http.createServer(handleRequest);
-    server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+    server.once("error", () => {
+      server.listen(0, "127.0.0.1", () => resolve(server.address().port));
+    });
+    server.listen(APP_PORT, "127.0.0.1", () => resolve(server.address().port));
   });
 }
 
