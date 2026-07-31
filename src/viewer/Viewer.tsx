@@ -85,6 +85,46 @@ function resetSim(handles: SimHandles) {
   }
 }
 
+/**
+ * Move the model datum to the grip point of its picked jaw/finger bodies:
+ * vise = middle of the jaws at their TOP surface, flipper/gripper = the point
+ * centered between the fingers. The model NEVER moves - the offsets are
+ * rewritten to the datum's current position relative to the station point,
+ * so only the reference (and the numbers) change.
+ */
+function autoCenterDatum(model: PickTarget["model"], wrapper: THREE.Group) {
+  const state = useApp.getState();
+  const sim = state.job.fixture.models[model].sim;
+  const idx = new Set([...(sim?.jawA ?? []), ...(sim?.jawB ?? [])]);
+  if (!idx.size) return;
+  const inner = wrapper.userData.alignedInner as THREE.Group | undefined;
+  if (!inner) return;
+  // world-space bounds of the picked bodies (scene is at rest while picking)
+  const box = new THREE.Box3();
+  wrapper.traverse((o) => {
+    const m = o as THREE.Mesh;
+    if (m.isMesh && idx.has(m.userData.bodyIndex as number)) box.expandByObject(m);
+  });
+  if (box.isEmpty()) return;
+  const world = box.getCenter(new THREE.Vector3());
+  if (model === "vise") world.z = box.max.z; // vise datum sits on top of the jaws
+  const local = wrapper.worldToLocal(world.clone());
+  // wrapper-local -> RAW model coords: undo the alignment position, rotation, scale
+  const raw = local
+    .clone()
+    .sub(inner.position)
+    .applyQuaternion(new THREE.Quaternion().setFromEuler(inner.rotation).invert())
+    .divideScalar(inner.scale.x || 1);
+  const r4 = (n: number) => Math.round(n * 10000) / 10000;
+  state.update((j) => {
+    const a = j.fixture.models[model];
+    a.datum = { x: r4(raw.x), y: r4(raw.y), z: r4(raw.z) };
+    a.offX = r4(local.x);
+    a.offY = r4(local.y);
+    a.offZ = r4(local.z);
+  });
+}
+
 // body-pick highlight materials (per group, shared across meshes)
 const MAT_PICK: Record<"rotating" | "jawA" | "jawB", THREE.Material> = {
   rotating: new THREE.MeshStandardMaterial({ color: 0xff8c2a, emissive: 0x5a2c00, metalness: 0.3, roughness: 0.5 }),
@@ -170,6 +210,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
   const [models, setModels] = useState<LoadedModels>({});
   const job = useApp((s) => s.job);
   const pick = useApp((s) => s.pick);
+  const datumCenter = useApp((s) => s.datumCenter);
   const pickRef = useRef<PickTarget | null>(null);
   pickRef.current = pick;
   const [, setUiTick] = useState(0);
@@ -289,6 +330,16 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
         camera
       );
       const hits = raycaster.intersectObjects(handles.pickGroups[p.model], true);
+      // the aligned wrapper this hit belongs to; its origin is the station point
+      const wrapperOf = (obj: THREE.Object3D): THREE.Group | undefined =>
+        handles.pickGroups[p.model].find((g) => {
+          let o: THREE.Object3D | null = obj;
+          while (o) {
+            if (o === g) return true;
+            o = o.parent;
+          }
+          return false;
+        });
       if (p.group === "datum") {
         // datum pick: snap to the nearest corner of the clicked triangle. The
         // MODEL MUST NOT MOVE - only the datum moves to the corner. So the
@@ -311,15 +362,7 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
             }
           }
           if (!best) continue;
-          // the wrapper this mesh belongs to; its origin is the station point
-          const wrapper = handles.pickGroups[p.model].find((g) => {
-            let o: THREE.Object3D | null = h.object;
-            while (o) {
-              if (o === g) return true;
-              o = o.parent;
-            }
-            return false;
-          });
+          const wrapper = wrapperOf(h.object);
           if (!wrapper) continue;
           const cornerNow = wrapper.worldToLocal(best.clone().applyMatrix4(mesh.matrixWorld));
           const r4 = (n: number) => Math.round(n * 10000) / 10000;
@@ -350,6 +393,11 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
           if (at >= 0) arr.splice(at, 1);
           else arr.push(idx);
         });
+        // jaw/finger picks re-center the datum on the picked bodies
+        if (group !== "rotating") {
+          const wrapper = wrapperOf(h.object);
+          if (wrapper) autoCenterDatum(p.model, wrapper);
+        }
         break;
       }
     };
@@ -366,7 +414,9 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
 
       const sim = simRef.current;
       const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
-      if (sim.on && sim.timeline && handles) {
+      // while picking bodies, hold the scene at rest so newly assigned
+      // jaws/fingers don't jump to the paused simulation's pose
+      if (sim.on && sim.timeline && handles && !pickRef.current) {
         if (sim.playing) {
           sim.t = Math.min(sim.timeline.total, sim.t + dt * sim.speed);
           if (sim.t >= sim.timeline.total) sim.playing = false;
@@ -436,6 +486,15 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
     }, 60);
     return () => clearTimeout(timer);
   }, [job, models, pick]);
+
+  // on-demand "center datum on jaws/fingers" request from the side panel
+  useEffect(() => {
+    if (!datumCenter) return;
+    const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
+    const wrapper = handles?.pickGroups[datumCenter]?.[0];
+    if (wrapper) autoCenterDatum(datumCenter, wrapper);
+    useApp.setState({ datumCenter: null });
+  }, [datumCenter]);
 
   // optional extra object (e.g. generated tray preview)
   useEffect(() => {

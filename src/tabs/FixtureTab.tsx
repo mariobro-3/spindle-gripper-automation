@@ -74,17 +74,21 @@ const PICK_MODEL_LABEL = { vise: "vise", flipper: "flipper", gripper: "gripper" 
  */
 function DatumField({ model }: { model: "vise" | "flipper" | "gripper" }) {
   const datum = useApp((s) => s.job.fixture.models[model].datum);
+  const sim = useApp((s) => s.job.fixture.models[model].sim);
   const pick = useApp((s) => s.pick);
   const setPick = useApp((s) => s.setPick);
+  const requestDatumCenter = useApp((s) => s.requestDatumCenter);
   const update = useApp((s) => s.update);
   const active = pick?.model === model && pick.group === "datum";
+  const hasJaws = (sim?.jawA?.length ?? 0) + (sim?.jawB?.length ?? 0) > 0;
+  const centerLabel = model === "vise" ? "Center on jaws" : "Center on fingers";
   return (
     <>
       <div className="pickrow">
         <span className="pickrow-label">Datum</span>
         <span className="pickrow-count">
           {datum
-            ? `corner (${datum.x.toFixed(2)}, ${datum.y.toFixed(2)}, ${datum.z.toFixed(2)})`
+            ? `(${datum.x.toFixed(2)}, ${datum.y.toFixed(2)}, ${datum.z.toFixed(2)})`
             : "auto (model center)"}
         </span>
         <button
@@ -92,6 +96,9 @@ function DatumField({ model }: { model: "vise" | "flipper" | "gripper" }) {
           onClick={() => setPick(active ? null : { model, group: "datum" })}
         >
           {active ? "Cancel" : "Pick corner"}
+        </button>
+        <button className="btn small" disabled={!hasJaws} onClick={() => requestDatumCenter(model)}>
+          {centerLabel}
         </button>
         <button
           className="btn small"
@@ -110,11 +117,14 @@ function DatumField({ model }: { model: "vise" | "flipper" | "gripper" }) {
         </button>
       </div>
       <p className="hint">
-        Pick corner, then click where faces meet on the {PICK_MODEL_LABEL[model]} in the viewer (snaps to the
-        nearest corner). The model stays put - the corner becomes the datum, and the offsets above update to
-        show where that corner sits relative to the station point. Edit them to position the model by its
-        corner (0, 0, 0 puts the corner exactly on the station point). Clear returns to automatic centering
-        and zeroes the offsets.
+        The model never moves when the datum changes - the offsets above are rewritten to show where the
+        datum sits relative to the station point, and further offset edits measure from it. Picking
+        jaw/finger bodies re-centers the datum on them automatically (
+        {model === "vise"
+          ? "middle of the jaws, at their top surface"
+          : "the point centered between the fingers"}
+        ); "{centerLabel}" redoes that anytime. "Pick corner" instead snaps the datum to a clicked corner of
+        the model. Clear returns to automatic centering and zeroes the offsets.
       </p>
     </>
   );

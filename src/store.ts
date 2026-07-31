@@ -128,8 +128,11 @@ interface AppState {
   dirty: boolean;
   /** when set, clicking bodies in the 3D viewer toggles them in the target group */
   pick: PickTarget | null;
+  /** one-shot request, processed by the Viewer: center the model datum on its picked jaw/finger bodies */
+  datumCenter: PickTarget["model"] | null;
   update: (mutator: (job: JobConfig) => void) => void;
   setPick: (pick: PickTarget | null) => void;
+  requestDatumCenter: (model: PickTarget["model"]) => void;
   loadJob: (job: Partial<JobConfig>) => void;
   resetJob: () => void;
   markSaved: () => void;
@@ -164,6 +167,8 @@ export const useApp = create<AppState>((set, get) => ({
   dirty: false,
   pick: null,
   setPick: (pick) => set({ pick }),
+  datumCenter: null,
+  requestDatumCenter: (model) => set({ datumCenter: model }),
   update: (mutator) => {
     const next = structuredClone(get().job);
     mutator(next);
