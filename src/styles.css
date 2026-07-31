@@ -128,10 +128,28 @@ body {
 }
 .split .panel-side {
   width: 380px;
+  flex-shrink: 0;
   overflow-y: auto;
   background: var(--bg2);
   border-left: 1px solid var(--border);
   padding: 12px;
+}
+.split .panel-resizer {
+  width: 6px;
+  margin-right: -6px; /* overlap the panel's left edge */
+  flex-shrink: 0;
+  cursor: col-resize;
+  position: relative;
+  z-index: 5;
+}
+.split .panel-resizer:hover,
+body.col-resizing .split .panel-resizer {
+  background: var(--accent);
+  opacity: 0.5;
+}
+body.col-resizing {
+  cursor: col-resize;
+  user-select: none;
 }
 
 .page {
@@ -174,6 +192,60 @@ body {
 .viewer-cube canvas {
   display: block;
 }
+/* body-pick editor rows */
+.subhead {
+  margin: 14px 0 4px;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-dim);
+}
+.pickrow {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+.pickrow-label {
+  flex: 1;
+  font-size: 13px;
+}
+.pickrow-count {
+  font-size: 11px;
+  color: var(--text-dim);
+  white-space: nowrap;
+}
+.pickrow.travel {
+  gap: 4px;
+  margin: 0 0 10px;
+}
+.pickrow.travel > label {
+  flex: 1;
+  margin: 0;
+}
+.btn.small {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+.pick-banner {
+  position: absolute;
+  top: 44px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: rgba(40, 28, 8, 0.92);
+  border: 1px solid #b97a2a;
+  color: #ffd9a0;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12px;
+  z-index: 6;
+  white-space: nowrap;
+}
+
 .sim-bar {
   position: absolute;
   bottom: 44px;
@@ -372,6 +444,26 @@ table.data td input[type="number"] {
   font-family: var(--mono);
   font-size: 13px;
   text-align: right;
+}
+
+.table-scroll { overflow-x: auto; }
+
+/* compact offset sheet so it fits the 380px side panel */
+table.offset-sheet th, table.offset-sheet td {
+  padding: 4px 5px;
+  white-space: nowrap;
+}
+table.offset-sheet td input[type="number"] {
+  width: 62px;
+  padding: 3px 4px;
+  font-size: 12px;
+  -moz-appearance: textfield;
+  appearance: textfield;
+}
+table.offset-sheet td input[type="number"]::-webkit-outer-spin-button,
+table.offset-sheet td input[type="number"]::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
 }
 
 /* ---------- code ---------- */

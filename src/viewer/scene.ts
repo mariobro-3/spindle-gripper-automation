@@ -1,5 +1,5 @@
 import * as THREE from "three";
-import type { JobConfig, ModelAlignment, ModelKey } from "../types";
+import type { JobConfig, ModelAlignment, ModelKey, ModelSimConfig, Vec3 } from "../types";
 import { datumLocal } from "../logic/offsets";
 import { machineOf } from "../logic/program";
 import { buildTrayGeometry, type TrayGeometry } from "../logic/trayModel";
@@ -7,14 +7,37 @@ import { tSlotMachineYs } from "../logic/tSlots";
 
 export type LoadedModels = Partial<Record<ModelKey, THREE.Group>>;
 
+/** models that can be articulated / body-picked */
+export type PickableModel = "vise" | "flipper" | "gripper";
+
+/** live groups inside one aligned model clone that the simulation moves */
+export interface ArticulationHandles {
+  rotPivot: THREE.Group | null;
+  rotAxis: "x" | "y" | "z";
+  /** jaw groups translate to these model-local offsets when OPEN, back to 0 when closed */
+  jawA: THREE.Group | null;
+  jawAOpen: Vec3;
+  jawB: THREE.Group | null;
+  jawBOpen: Vec3;
+}
+
 /** live object handles for the kinematic simulation, stored on root.userData.simHandles */
 export interface SimHandles {
   gripper: THREE.Group;
   gripDot: THREE.Mesh;
+  gripperArt: ArticulationHandles | null;
   parts: THREE.Mesh[];
+  /** whole-model fallback pivot, used when no rotating bodies are picked */
   flipperPivot: THREE.Group | null;
+  flipperArt: ArticulationHandles | null;
+  vise1Art: ArticulationHandles | null;
+  vise2Art: ArticulationHandles | null;
   markers: { vise1: THREE.Mesh; vise2: THREE.Mesh; flipper: THREE.Mesh };
   trayStock: THREE.Object3D[];
+  /** model instances that body-pick clicks raycast against */
+  pickGroups: Record<PickableModel, THREE.Group[]>;
+  /** grip plane heights above the plate, derived from the picked jaw/finger bodies */
+  gripHeights: { vise: number | null; flipper: number | null };
 }
 
 /** height of the flipper rotation axis above the plate top (viewer approximation) */
@@ -37,9 +60,28 @@ const matBin = new THREE.MeshStandardMaterial({
   side: THREE.DoubleSide,
 });
 
+/**
+ * Clone + orient a STEP model and place it at the wrapper origin.
+ *
+ * Placement:
+ * - no datum picked (default): bounding-box center on the station point in
+ *   XY, bottom on the plate (z=0), then the user's manual offsets
+ * - datum corner picked: that corner lands on the station point at plate top,
+ *   and offX/offY/offZ measure from the corner
+ *
+ * Articulation body picks NEVER move the model - the picked jaw/finger bodies
+ * just record the grip plane so the simulation knows where parts sit:
+ * userData.gripTopZ (top surface of the jaws) and userData.gripCenterZ
+ * (center between the fingers).
+ */
 function applyAlignment(model: THREE.Group, align: ModelAlignment, scale: number): THREE.Group {
   const wrapper = new THREE.Group();
   const inner = model.clone();
+  // tag each solid with its index (clone preserves child order) so bodies can
+  // be picked in the viewer and articulated by the simulation
+  inner.children.forEach((child, i) => {
+    child.userData.bodyIndex = i;
+  });
   inner.scale.setScalar(scale);
   // 'ZYX' applies X first, then Y, then Z - matches "stand the model up, then turn it"
   inner.rotation.set(
@@ -49,13 +91,162 @@ function applyAlignment(model: THREE.Group, align: ModelAlignment, scale: number
     "ZYX"
   );
   wrapper.add(inner);
-  // auto-place: center XY on origin, bottom at z=0, then user offsets
   const box = new THREE.Box3().setFromObject(inner);
   if (!box.isEmpty()) {
-    const center = box.getCenter(new THREE.Vector3());
-    inner.position.set(-center.x + align.offX, -center.y + align.offY, -box.min.z + align.offZ);
+    // grip plane from the picked jaw / finger bodies (info only, no placement),
+    // measured before inner is positioned, then shifted by posZ below
+    const jawIdx = new Set([...(align.sim?.jawA ?? []), ...(align.sim?.jawB ?? [])]);
+    const jb = new THREE.Box3();
+    if (jawIdx.size) {
+      for (const child of inner.children) {
+        if (jawIdx.has(child.userData.bodyIndex as number)) jb.expandByObject(child);
+      }
+    }
+
+    if (align.datum) {
+      // datum corner (raw model coords) -> wrapper space: scale, then rotate
+      // (matches how Object3D applies inner.scale / inner.rotation)
+      const dp = new THREE.Vector3(align.datum.x, align.datum.y, align.datum.z)
+        .multiplyScalar(scale)
+        .applyEuler(inner.rotation);
+      inner.position.set(-dp.x + align.offX, -dp.y + align.offY, -dp.z + align.offZ);
+    } else {
+      const center = box.getCenter(new THREE.Vector3());
+      inner.position.set(-center.x + align.offX, -center.y + align.offY, -box.min.z + align.offZ);
+    }
+
+    if (!jb.isEmpty()) {
+      wrapper.userData.gripTopZ = jb.max.z + inner.position.z;
+      wrapper.userData.gripCenterZ = jb.getCenter(new THREE.Vector3()).z + inner.position.z;
+    }
   }
+  wrapper.userData.alignedInner = inner;
   return wrapper;
+}
+
+/**
+ * Regroup the picked bodies of an aligned model clone into movable sub-groups:
+ * a rotation pivot (at the bounding-box center of the rotating bodies) and up
+ * to two translating jaw groups.
+ *
+ * Jaw / finger groups ALWAYS nest under the rotation pivot when one exists, so
+ * flipper grip fingers ride with the head without also being listed as rotating.
+ * Returns null when nothing is configured.
+ */
+function articulate(wrapper: THREE.Group, sim: ModelSimConfig | undefined, scale: number): ArticulationHandles | null {
+  const inner = wrapper.userData.alignedInner as THREE.Group | undefined;
+  if (!sim || !inner) return null;
+  if (!sim.rotating.length && !sim.jawA.length && !sim.jawB.length) return null;
+
+  const byIndex = new Map<number, THREE.Object3D>();
+  for (const child of [...inner.children]) {
+    if (child.userData.bodyIndex !== undefined) byIndex.set(child.userData.bodyIndex as number, child);
+  }
+
+  let rotPivot: THREE.Group | null = null;
+  let pivotCenter = new THREE.Vector3();
+  if (sim.rotating.length) {
+    // pivot at the combined bbox center of the rotating bodies (model-local coords)
+    const box = new THREE.Box3();
+    for (const i of sim.rotating) {
+      const m = byIndex.get(i) as THREE.Mesh | undefined;
+      if (!m?.geometry) continue;
+      m.geometry.computeBoundingBox();
+      if (m.geometry.boundingBox) box.union(m.geometry.boundingBox);
+    }
+    pivotCenter = box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+    rotPivot = new THREE.Group();
+    rotPivot.position.copy(pivotCenter);
+    inner.add(rotPivot);
+    for (const i of sim.rotating) {
+      const m = byIndex.get(i);
+      if (!m) continue;
+      rotPivot.add(m);
+      m.position.set(-pivotCenter.x, -pivotCenter.y, -pivotCenter.z);
+    }
+  }
+
+  const makeJaw = (indices: number[]): THREE.Group | null => {
+    if (!indices.length) return null;
+    // fingers / jaws ride with the rotating head when one is configured
+    const parent = rotPivot ?? inner;
+    const g = new THREE.Group();
+    parent.add(g);
+    for (const i of indices) {
+      const m = byIndex.get(i);
+      if (!m) continue;
+      const wasOnPivot = m.parent === rotPivot;
+      g.add(m);
+      // body was still on the model root at identity - re-express relative to the pivot
+      if (rotPivot && !wasOnPivot) {
+        m.position.set(-pivotCenter.x, -pivotCenter.y, -pivotCenter.z);
+      }
+    }
+    return g;
+  };
+
+  const jawA = makeJaw(sim.jawA);
+  const jawB = makeJaw(sim.jawB);
+
+  /** bbox center of picked bodies in their current parent-local space */
+  const bodiesCenter = (indices: number[]): THREE.Vector3 => {
+    const box = new THREE.Box3();
+    for (const i of indices) {
+      const m = byIndex.get(i) as THREE.Mesh | undefined;
+      if (!m?.geometry) continue;
+      m.geometry.computeBoundingBox();
+      if (!m.geometry.boundingBox) continue;
+      const b = m.geometry.boundingBox.clone().translate(m.position);
+      box.union(b);
+    }
+    return box.isEmpty() ? new THREE.Vector3() : box.getCenter(new THREE.Vector3());
+  };
+
+  // open direction from geometry: A↔B line, or single jaw away from the rest of the model.
+  // travel is inches; convert to model units so after the parent scale it is correct in inches.
+  const openOffset = (travelIn: number, dir: THREE.Vector3): Vec3 => {
+    const d = (Math.abs(travelIn) / scale) || 0;
+    return { x: dir.x * d, y: dir.y * d, z: dir.z * d };
+  };
+  let dirA = new THREE.Vector3(0, 1, 0);
+  let dirB = new THREE.Vector3(0, -1, 0);
+  if (sim.jawA.length && sim.jawB.length) {
+    const cA = bodiesCenter(sim.jawA);
+    const cB = bodiesCenter(sim.jawB);
+    const sep = new THREE.Vector3().subVectors(cB, cA);
+    if (sep.lengthSq() > 1e-8) {
+      sep.normalize();
+      dirA = sep.clone().negate(); // A opens away from B
+      dirB = sep; // B opens away from A
+    }
+  } else if (sim.jawA.length || sim.jawB.length) {
+    const idxs = sim.jawA.length ? sim.jawA : sim.jawB;
+    const cJaw = bodiesCenter(idxs);
+    const rest: number[] = [];
+    byIndex.forEach((_, i) => {
+      if (!idxs.includes(i)) rest.push(i);
+    });
+    const cRest = rest.length ? bodiesCenter(rest) : new THREE.Vector3();
+    const away = new THREE.Vector3().subVectors(cJaw, cRest);
+    if (away.lengthSq() > 1e-8) away.normalize();
+    else away.set(0, 1, 0);
+    if (sim.jawA.length) {
+      dirA = away;
+      dirB = away.clone().negate();
+    } else {
+      dirB = away;
+      dirA = away.clone().negate();
+    }
+  }
+
+  return {
+    rotPivot,
+    rotAxis: sim.rotAxis,
+    jawA,
+    jawAOpen: openOffset(sim.jawATravel ?? 0, dirA),
+    jawB,
+    jawBOpen: openOffset(sim.jawBTravel ?? 0, dirB),
+  };
 }
 
 function fallbackBox(l: number, w: number, h: number, mat: THREE.Material): THREE.Group {
@@ -200,24 +391,49 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
 
   const markers = {} as SimHandles["markers"];
   let flipperPivot: THREE.Group | null = null;
+  let flipperArt: ArticulationHandles | null = null;
+  let vise1Art: ArticulationHandles | null = null;
+  let vise2Art: ArticulationHandles | null = null;
+  const pickGroups: SimHandles["pickGroups"] = { vise: [], flipper: [], gripper: [] };
+  const gripHeights: SimHandles["gripHeights"] = { vise: null, flipper: null };
 
   for (const s of stations) {
     let obj: THREE.Group;
+    let art: ArticulationHandles | null = null;
     if (s.model && s.align.visible) {
       obj = applyAlignment(s.model, s.align, stepScale);
+      art = articulate(obj, s.align.sim, stepScale);
+      pickGroups[s.key === "flipper" ? "flipper" : "vise"].push(obj);
+      // grip plane from the picked jaws: vise datum = top of jaws, flipper
+      // nest = center between the fingers
+      if (s.key !== "flipper" && typeof obj.userData.gripTopZ === "number") {
+        gripHeights.vise = obj.userData.gripTopZ;
+      }
+      if (s.key === "flipper" && typeof obj.userData.gripCenterZ === "number") {
+        gripHeights.flipper = obj.userData.gripCenterZ;
+      }
     } else if (s.align.visible) {
       obj = fallbackBox(...s.fallback, matFallback);
     } else {
       obj = new THREE.Group();
     }
+    if (s.key === "vise1") vise1Art = art;
+    if (s.key === "vise2") vise2Art = art;
     if (s.key === "flipper") {
-      // wrap in a pivot at the nest axis so the simulation can swing it 180
-      const pivot = new THREE.Group();
-      pivot.position.set(s.x, s.y, FLIP_AXIS_Z);
-      obj.position.set(0, 0, -FLIP_AXIS_Z);
-      pivot.add(obj);
-      assembly.add(pivot);
-      flipperPivot = pivot;
+      flipperArt = art;
+      if (art?.rotPivot) {
+        // only the picked head bodies rotate, about their own bbox center
+        obj.position.set(s.x, s.y, 0);
+        assembly.add(obj);
+      } else {
+        // fallback: swing the whole model about an approximated nest axis
+        const pivot = new THREE.Group();
+        pivot.position.set(s.x, s.y, FLIP_AXIS_Z);
+        obj.position.set(0, 0, -FLIP_AXIS_Z);
+        pivot.add(obj);
+        assembly.add(pivot);
+        flipperPivot = pivot;
+      }
     } else {
       obj.position.set(s.x, s.y, 0);
       assembly.add(obj);
@@ -306,9 +522,28 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
   // ---- simulation objects (hidden until the simulation runs) ----
   // animated gripper: group origin = grip tip (bottom center of the model)
   const simGripper = new THREE.Group();
+  let gripperArt: ArticulationHandles | null = null;
   const gripBody = models.gripper
     ? applyAlignment(models.gripper, fx.models.gripper, stepScale)
     : fallbackBox(1.4, 1.4, 4, matFallback);
+  if (models.gripper) {
+    gripperArt = articulate(gripBody, fx.models.gripper.sim, stepScale);
+    pickGroups.gripper.push(gripBody);
+  }
+  // parked over the flipper station; also shown here during body picking
+  {
+    const rad0 = THREE.MathUtils.degToRad(job.datum.rotation ?? 0);
+    const cos = Math.cos(rad0);
+    const sin = Math.sin(rad0);
+    const d0 = datumLocal(job.datum.ref, fx.plateLength, fx.plateWidth);
+    const rx = fx.flipperX - d0.x;
+    const ry = fx.flipperY - d0.y;
+    simGripper.position.set(
+      job.datum.machineX + cos * rx - sin * ry,
+      job.datum.machineY + sin * rx + cos * ry,
+      8
+    );
+  }
   simGripper.add(gripBody);
   const gripDot = new THREE.Mesh(
     new THREE.SphereGeometry(0.22, 16, 16),
@@ -338,10 +573,16 @@ export function buildFixtureScene(job: JobConfig, models: LoadedModels): THREE.G
   const handles: SimHandles = {
     gripper: simGripper,
     gripDot,
+    gripperArt,
     parts: simParts,
     flipperPivot,
+    flipperArt,
+    vise1Art,
+    vise2Art,
     markers,
     trayStock,
+    pickGroups,
+    gripHeights,
   };
   root.userData.simHandles = handles;
 

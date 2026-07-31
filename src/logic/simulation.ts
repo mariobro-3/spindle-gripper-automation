@@ -41,18 +41,28 @@ export interface SimTimeline {
 // viewer-space constants (machine coords, plate top = z0)
 const SAFE_Z = 10;
 const APPROACH = 1.2; // hover height above the grab point
-const VISE_PART_Z = 2.1; // part center height in a vise
-const FLIP_PART_Z = 3.2; // part center height in the flipper nest
+const VISE_PART_Z = 2.1; // fallback part center height in a vise
+const FLIP_PART_Z = 3.2; // fallback part center height in the flipper nest
 const RAPID_IPS = 22; // in/s XY travel
 const PLUNGE_IPS = 7; // in/s Z plunge/retract
 const MIN_MOVE_MS = 120;
 
-export function buildSimTimeline(job: JobConfig): SimTimeline {
+/** grip plane heights derived from the picked jaw/finger bodies in the scene */
+export interface SimHeights {
+  /** top surface of the vise jaws (part center rides here) */
+  vise?: number | null;
+  /** center between the flipper grip fingers */
+  flipper?: number | null;
+}
+
+export function buildSimTimeline(job: JobConfig, heights?: SimHeights): SimTimeline {
   const m = machineOf(job);
   const d = m.delays;
   const so = job.spindleOrient;
   const fx = job.fixture;
   const h = job.stock.height;
+  const visePartZ = heights?.vise ?? VISE_PART_Z;
+  const flipPartZ = heights?.flipper ?? FLIP_PART_Z;
 
   const v1 = plateToMachine(job, fx.vise1X, fx.vise1Y);
   const v2 = plateToMachine(job, fx.vise2X, fx.vise2Y);
@@ -213,24 +223,24 @@ export function buildSimTimeline(job: JobConfig): SimTimeline {
     pick(part, p.x, p.y, trayPartZ, null, `tray pocket ${part}`);
     orient(so.vise1, "orient for vise 1");
     setState("vise1", false, "open vise 1");
-    place(part, v1.x, v1.y, VISE_PART_Z, "vise1", "vise 1");
+    place(part, v1.x, v1.y, visePartZ, "vise1", "vise 1");
   };
 
   const unloadVise1 = (part: number) => {
     ensureTool(m.gripperTool, "gripper 1");
     orient(so.vise1, "orient for vise 1");
-    pick(part, v1.x, v1.y, VISE_PART_Z, "vise1", `vise 1 (part ${part})`);
+    pick(part, v1.x, v1.y, visePartZ, "vise1", `vise 1 (part ${part})`);
   };
 
   const loadFlipper = (part: number) => {
     orient(so.flipper, "orient for flipper");
-    place(part, fl.x, fl.y, FLIP_PART_Z, "flipGrip", "flipper nest");
+    place(part, fl.x, fl.y, flipPartZ, "flipGrip", "flipper nest");
   };
 
   const unloadVise2 = (part: number) => {
     ensureTool(grip2Tool, "op2 gripper");
     orient(so.vise2, "orient for vise 2");
-    pick(part, v2.x, v2.y, VISE_PART_Z, "vise2", `vise 2 (part ${part})`);
+    pick(part, v2.x, v2.y, visePartZ, "vise2", `vise 2 (part ${part})`);
   };
 
   const deposit = (part: number) => {
@@ -242,13 +252,13 @@ export function buildSimTimeline(job: JobConfig): SimTimeline {
   const unloadFlipper = (part: number) => {
     ensureTool(grip2Tool, "op2 gripper");
     orient(so.flipper, "orient for flipper");
-    pick(part, fl.x, fl.y, FLIP_PART_Z, "flipGrip", `flipper (part ${part})`);
+    pick(part, fl.x, fl.y, flipPartZ, "flipGrip", `flipper (part ${part})`);
   };
 
   const loadVise2 = (part: number) => {
     orient(so.vise2, "orient for vise 2");
     setState("vise2", false, "open vise 2");
-    place(part, v2.x, v2.y, VISE_PART_Z, "vise2", "vise 2");
+    place(part, v2.x, v2.y, visePartZ, "vise2", "vise 2");
   };
 
   // ---- the two-op pipelined cycle

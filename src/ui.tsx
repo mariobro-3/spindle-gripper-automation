@@ -1,4 +1,50 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type ReactNode } from "react";
+
+const PANEL_WIDTH_KEY = "sga-panel-width";
+const PANEL_MIN = 300;
+
+/**
+ * Right side panel with a draggable left edge. The width is shared across all
+ * tabs and remembered between sessions.
+ */
+export function ResizablePanel({ children }: { children: ReactNode }) {
+  const [width, setWidth] = useState(() => {
+    const saved = Number(localStorage.getItem(PANEL_WIDTH_KEY));
+    return saved >= PANEL_MIN ? saved : 380;
+  });
+  const widthRef = useRef(width);
+  widthRef.current = width;
+
+  const startDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startW = widthRef.current;
+    const maxW = Math.max(500, Math.round(window.innerWidth * 0.7));
+    const move = (ev: PointerEvent) => {
+      const w = Math.min(maxW, Math.max(PANEL_MIN, startW + (startX - ev.clientX)));
+      widthRef.current = w;
+      setWidth(w);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      document.body.classList.remove("col-resizing");
+      localStorage.setItem(PANEL_WIDTH_KEY, String(widthRef.current));
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+    document.body.classList.add("col-resizing");
+  };
+
+  return (
+    <>
+      <div className="panel-resizer" onPointerDown={startDrag} title="Drag to resize" />
+      <div className="panel-side" style={{ width }}>
+        {children}
+      </div>
+    </>
+  );
+}
 
 export function NumField({
   label,

@@ -1,7 +1,27 @@
 import { create } from "zustand";
-import type { JobConfig } from "./types";
+import type { JobConfig, ModelKey } from "./types";
 import { defaultDelays, defaultJob, defaultMachines, defaultModelAlignments, defaultTemplates, JOB_VERSION } from "./defaults";
 import { autoOffsets } from "./logic/offsets";
+
+/** upgrade legacy jaw open fields (Vec3 or {axis,travel}) to a plain inch distance */
+function normalizeJawTravel(sim: Record<string, unknown>, key: "jawA" | "jawB", fallback: number): number {
+  const travelKey = key === "jawA" ? "jawATravel" : "jawBTravel";
+  const openKey = key === "jawA" ? "jawAOpen" : "jawBOpen";
+  const direct = sim[travelKey];
+  if (typeof direct === "number" && Number.isFinite(direct)) return Math.abs(direct);
+  const raw = sim[openKey];
+  if (typeof raw === "number" && Number.isFinite(raw)) return Math.abs(raw);
+  if (raw && typeof raw === "object") {
+    const o = raw as Record<string, unknown>;
+    if (typeof o.travel === "number") return Math.abs(o.travel);
+    const x = Number(o.x) || 0;
+    const y = Number(o.y) || 0;
+    const z = Number(o.z) || 0;
+    const mag = Math.hypot(x, y, z);
+    if (mag > 0) return mag;
+  }
+  return fallback;
+}
 
 /** deep-merge loaded job over defaults so older job files gain new fields */
 function mergeJob(loaded: Partial<JobConfig>): JobConfig {
@@ -81,14 +101,35 @@ function mergeJob(loaded: Partial<JobConfig>): JobConfig {
   if (!loaded.offsets) {
     merged.offsets = autoOffsets(merged);
   }
+  // normalize simulation jaw travel to a plain inch distance
+  for (const key of Object.keys(merged.fixture.models) as ModelKey[]) {
+    const sim = merged.fixture.models[key].sim as (typeof merged.fixture.models)[ModelKey]["sim"] &
+      Record<string, unknown> | undefined;
+    if (!sim) continue;
+    sim.jawATravel = normalizeJawTravel(sim as Record<string, unknown>, "jawA", 0.25);
+    sim.jawBTravel = normalizeJawTravel(sim as Record<string, unknown>, "jawB", 0.25);
+    delete (sim as Record<string, unknown>).jawAOpen;
+    delete (sim as Record<string, unknown>).jawBOpen;
+  }
   merged.version = JOB_VERSION;
   return merged;
+}
+
+/** viewer body-pick mode: which model slot and articulation group is being edited */
+export type PickGroup = "rotating" | "jawA" | "jawB";
+export interface PickTarget {
+  model: "vise" | "flipper" | "gripper";
+  /** articulation group to toggle bodies in, or "datum" = click a corner to set the model datum */
+  group: PickGroup | "datum";
 }
 
 interface AppState {
   job: JobConfig;
   dirty: boolean;
+  /** when set, clicking bodies in the 3D viewer toggles them in the target group */
+  pick: PickTarget | null;
   update: (mutator: (job: JobConfig) => void) => void;
+  setPick: (pick: PickTarget | null) => void;
   loadJob: (job: Partial<JobConfig>) => void;
   resetJob: () => void;
   markSaved: () => void;
@@ -121,6 +162,8 @@ function scheduleAutosave(job: JobConfig) {
 export const useApp = create<AppState>((set, get) => ({
   job: loadAutosave(),
   dirty: false,
+  pick: null,
+  setPick: (pick) => set({ pick }),
   update: (mutator) => {
     const next = structuredClone(get().job);
     mutator(next);

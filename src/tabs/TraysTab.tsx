@@ -1,6 +1,6 @@
 import { useApp } from "../store";
 import { Viewer } from "../viewer/Viewer";
-import { NumField, Section, SelectField } from "../ui";
+import { NumField, ResizablePanel, Section, SelectField } from "../ui";
 import type { TrayConfig } from "../types";
 
 function TrayFields({
@@ -38,7 +38,7 @@ export function TraysTab() {
       <div className="viewer-side">
         <Viewer />
       </div>
-      <div className="panel-side">
+      <ResizablePanel>
         <Section title="Raw Stock">
           <NumField label="Length (X)" value={job.stock.length} unit="in" onChange={(v) => update((j) => (j.stock.length = v))} />
           <NumField label="Width (Y)" value={job.stock.width} unit="in" onChange={(v) => update((j) => (j.stock.width = v))} />
@@ -80,7 +80,7 @@ export function TraysTab() {
             <TrayFields tray={job.finished.tray} onChange={(mut) => update((j) => mut(j.finished.tray))} />
           )}
         </Section>
-      </div>
+      </ResizablePanel>
     </div>
   );
 }

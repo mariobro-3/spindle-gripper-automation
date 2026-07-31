@@ -5,19 +5,56 @@ import { useApp } from "../store";
 import { machineOf } from "../logic/program";
 import { listCadFiles, cadFileUrl } from "../api";
 import { loadStepMeshes, meshesToGroup } from "./stepLoader";
-import { buildFixtureScene, disposeObject, type LoadedModels, type SimHandles } from "./scene";
+import {
+  buildFixtureScene,
+  disposeObject,
+  type ArticulationHandles,
+  type LoadedModels,
+  type SimHandles,
+} from "./scene";
 import { createViewCube } from "./viewCube";
 import { buildSimTimeline, stateAt, type SimState, type SimTimeline } from "../logic/simulation";
-import type { ModelKey } from "../types";
+import { defaultModelSim } from "../defaults";
+import type { PickTarget } from "../store";
+import type { JobConfig, ModelKey } from "../types";
 
 const SIM_CLOSED = 0x35d073;
 const SIM_OPEN = 0xffb347;
+
+/** open/close a pair of articulated jaw groups */
+function applyJaws(art: ArticulationHandles | null, open: boolean) {
+  if (!art) return;
+  if (art.jawA) {
+    if (open) art.jawA.position.set(art.jawAOpen.x, art.jawAOpen.y, art.jawAOpen.z);
+    else art.jawA.position.set(0, 0, 0);
+  }
+  if (art.jawB) {
+    if (open) art.jawB.position.set(art.jawBOpen.x, art.jawBOpen.y, art.jawBOpen.z);
+    else art.jawB.position.set(0, 0, 0);
+  }
+}
+
+function setRotation(art: ArticulationHandles, deg: number) {
+  const rad = THREE.MathUtils.degToRad(deg);
+  art.rotPivot!.rotation.set(
+    art.rotAxis === "x" ? rad : 0,
+    art.rotAxis === "y" ? rad : 0,
+    art.rotAxis === "z" ? rad : 0
+  );
+}
 
 function applySim(handles: SimHandles, st: SimState) {
   handles.gripper.visible = true;
   handles.gripper.position.set(st.gripper.x, st.gripper.y, st.gripper.z);
   handles.gripper.rotation.z = THREE.MathUtils.degToRad(st.orientDeg);
-  if (handles.flipperPivot) handles.flipperPivot.rotation.y = THREE.MathUtils.degToRad(st.flipDeg);
+  // flipper rotation: picked head bodies if configured, else the whole model
+  if (handles.flipperArt?.rotPivot) setRotation(handles.flipperArt, st.flipDeg);
+  else if (handles.flipperPivot) handles.flipperPivot.rotation.y = THREE.MathUtils.degToRad(st.flipDeg);
+  // articulated jaws (devices store closed=true; jaws travel when open)
+  applyJaws(handles.vise1Art, !st.devices.vise1);
+  applyJaws(handles.vise2Art, !st.devices.vise2);
+  applyJaws(handles.flipperArt, !st.devices.flipGrip);
+  applyJaws(handles.gripperArt, !st.devices.gripper);
   st.parts.forEach((p, i) => {
     const mesh = handles.parts[i];
     if (!mesh) return;
@@ -38,9 +75,44 @@ function resetSim(handles: SimHandles) {
   for (const p of handles.parts) p.visible = false;
   for (const o of handles.trayStock) o.visible = true;
   if (handles.flipperPivot) handles.flipperPivot.rotation.y = 0;
+  if (handles.flipperArt?.rotPivot) setRotation(handles.flipperArt, 0);
+  applyJaws(handles.vise1Art, false);
+  applyJaws(handles.vise2Art, false);
+  applyJaws(handles.flipperArt, false);
+  applyJaws(handles.gripperArt, false);
   for (const mesh of [handles.markers.vise1, handles.markers.vise2, handles.markers.flipper]) {
     (mesh.material as THREE.MeshBasicMaterial).color.set(mesh.userData.baseColor as number);
   }
+}
+
+// body-pick highlight materials (per group, shared across meshes)
+const MAT_PICK: Record<"rotating" | "jawA" | "jawB", THREE.Material> = {
+  rotating: new THREE.MeshStandardMaterial({ color: 0xff8c2a, emissive: 0x5a2c00, metalness: 0.3, roughness: 0.5 }),
+  jawA: new THREE.MeshStandardMaterial({ color: 0x35d073, emissive: 0x0c4423, metalness: 0.3, roughness: 0.5 }),
+  jawB: new THREE.MeshStandardMaterial({ color: 0xba6bff, emissive: 0x3a1466, metalness: 0.3, roughness: 0.5 }),
+};
+
+/** tint the selected bodies of the picked model; fresh clones restore originals on rebuild */
+function applyPickHighlight(handles: SimHandles, pick: PickTarget | null, job: JobConfig) {
+  if (!pick) return;
+  const sim = job.fixture.models[pick.model].sim;
+  const sel = {
+    rotating: new Set(sim?.rotating ?? []),
+    jawA: new Set(sim?.jawA ?? []),
+    jawB: new Set(sim?.jawB ?? []),
+  };
+  for (const g of handles.pickGroups[pick.model]) {
+    g.traverse((o) => {
+      const m = o as THREE.Mesh;
+      const idx = m.userData.bodyIndex as number | undefined;
+      if (!m.isMesh || idx === undefined) return;
+      if (sel.rotating.has(idx)) m.material = MAT_PICK.rotating;
+      else if (sel.jawA.has(idx)) m.material = MAT_PICK.jawA;
+      else if (sel.jawB.has(idx)) m.material = MAT_PICK.jawB;
+    });
+  }
+  // the animated gripper is normally hidden - show it while picking its bodies
+  if (pick.model === "gripper") handles.gripper.visible = true;
 }
 
 interface SimRef {
@@ -97,6 +169,9 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
   });
   const [models, setModels] = useState<LoadedModels>({});
   const job = useApp((s) => s.job);
+  const pick = useApp((s) => s.pick);
+  const pickRef = useRef<PickTarget | null>(null);
+  pickRef.current = pick;
   const [, setUiTick] = useState(0);
   const simRef = useRef<SimRef>({
     on: false,
@@ -192,6 +267,95 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
 
     simRef.current.sync = () => setUiTick((n) => n + 1);
 
+    // body picking: a click (not a drag) toggles the hit body in the active group
+    const raycaster = new THREE.Raycaster();
+    let downX = 0;
+    let downY = 0;
+    const onPointerDown = (e: PointerEvent) => {
+      downX = e.clientX;
+      downY = e.clientY;
+    };
+    const onPointerUp = (e: PointerEvent) => {
+      if (Math.hypot(e.clientX - downX, e.clientY - downY) > 5) return;
+      const p = pickRef.current;
+      const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
+      if (!p || !handles) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      raycaster.setFromCamera(
+        new THREE.Vector2(
+          ((e.clientX - rect.left) / rect.width) * 2 - 1,
+          -((e.clientY - rect.top) / rect.height) * 2 + 1
+        ),
+        camera
+      );
+      const hits = raycaster.intersectObjects(handles.pickGroups[p.model], true);
+      if (p.group === "datum") {
+        // datum pick: snap to the nearest corner of the clicked triangle. The
+        // MODEL MUST NOT MOVE - only the datum moves to the corner. So the
+        // offsets are rewritten to the corner's current position relative to
+        // the station point, which keeps the placement identical while all
+        // future offset edits measure from the picked corner.
+        for (const h of hits) {
+          const mesh = h.object as THREE.Mesh;
+          if (!mesh.isMesh || !h.face) continue;
+          const posAttr = mesh.geometry.getAttribute("position");
+          let best: THREE.Vector3 | null = null;
+          let bestDist = Infinity;
+          for (const vi of [h.face.a, h.face.b, h.face.c]) {
+            const raw = new THREE.Vector3().fromBufferAttribute(posAttr, vi);
+            const world = raw.clone().applyMatrix4(mesh.matrixWorld);
+            const dist = world.distanceTo(h.point);
+            if (dist < bestDist) {
+              bestDist = dist;
+              best = raw;
+            }
+          }
+          if (!best) continue;
+          // the wrapper this mesh belongs to; its origin is the station point
+          const wrapper = handles.pickGroups[p.model].find((g) => {
+            let o: THREE.Object3D | null = h.object;
+            while (o) {
+              if (o === g) return true;
+              o = o.parent;
+            }
+            return false;
+          });
+          if (!wrapper) continue;
+          const cornerNow = wrapper.worldToLocal(best.clone().applyMatrix4(mesh.matrixWorld));
+          const r4 = (n: number) => Math.round(n * 10000) / 10000;
+          const v = best;
+          useApp.getState().update((j) => {
+            const a = j.fixture.models[p.model];
+            a.datum = { x: v.x, y: v.y, z: v.z };
+            a.offX = r4(cornerNow.x);
+            a.offY = r4(cornerNow.y);
+            a.offZ = r4(cornerNow.z);
+          });
+          useApp.getState().setPick(null); // one-shot: exit datum mode
+          break;
+        }
+        return;
+      }
+      for (const h of hits) {
+        let o: THREE.Object3D | null = h.object;
+        while (o && o.userData.bodyIndex === undefined) o = o.parent;
+        if (!o) continue;
+        const idx = o.userData.bodyIndex as number;
+        const group = p.group;
+        useApp.getState().update((j) => {
+          const align = j.fixture.models[p.model];
+          if (!align.sim) align.sim = defaultModelSim();
+          const arr = align.sim[group];
+          const at = arr.indexOf(idx);
+          if (at >= 0) arr.splice(at, 1);
+          else arr.push(idx);
+        });
+        break;
+      }
+    };
+    renderer.domElement.addEventListener("pointerdown", onPointerDown);
+    renderer.domElement.addEventListener("pointerup", onPointerUp);
+
     let raf = 0;
     let last = performance.now();
     const animate = () => {
@@ -237,6 +401,8 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       cancelAnimationFrame(raf);
       ro.disconnect();
       viewCube.dispose();
+      renderer.domElement.removeEventListener("pointerdown", onPointerDown);
+      renderer.domElement.removeEventListener("pointerup", onPointerUp);
       controls.dispose();
       if (sceneGroupRef.current) {
         scene.remove(sceneGroupRef.current);
@@ -259,15 +425,17 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       const group = buildFixtureScene(job, models);
       sceneGroupRef.current = group;
       scene.add(group);
+      const handles = group.userData.simHandles as SimHandles;
+      applyPickHighlight(handles, pick, job);
       // job changed while simulating: rebuild the timeline against the new job
       const sim = simRef.current;
       if (sim.on) {
-        sim.timeline = buildSimTimeline(job);
+        sim.timeline = buildSimTimeline(job, handles.gripHeights);
         sim.t = Math.min(sim.t, sim.timeline.total);
       }
     }, 60);
     return () => clearTimeout(timer);
-  }, [job, models]);
+  }, [job, models, pick]);
 
   // optional extra object (e.g. generated tray preview)
   useEffect(() => {
@@ -290,7 +458,8 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
       const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
       if (handles) resetSim(handles);
     } else {
-      sim.timeline = buildSimTimeline(job);
+      const handles = sceneGroupRef.current?.userData.simHandles as SimHandles | undefined;
+      sim.timeline = buildSimTimeline(job, handles?.gripHeights);
       sim.t = 0;
       sim.on = true;
       sim.playing = true;
@@ -317,6 +486,25 @@ export function Viewer({ extraObject }: { extraObject?: THREE.Object3D | null })
         )}
       </div>
       <div ref={cubeMountRef} className="viewer-cube" />
+      {pick && (
+        <div className="pick-banner">
+          {pick.group === "datum" ? (
+            <>
+              <b>Datum pick mode:</b> click a corner on the {pick.model} model - it snaps to the nearest
+              vertex and becomes the model's datum
+            </>
+          ) : (
+            <>
+              <b>Body pick mode:</b> click {pick.model} bodies to add / remove them from "
+              {pick.group === "rotating" ? "Rotating head" : pick.group === "jawA" ? "Moving group A" : "Moving group B"}
+              "
+            </>
+          )}
+          <button className="btn" onClick={() => useApp.getState().setPick(null)}>
+            {pick.group === "datum" ? "Cancel" : "Done"}
+          </button>
+        </div>
+      )}
       <div className="sim-bar">
         <button className={`btn ${sim.on ? "danger" : "primary"}`} onClick={toggleSim}>
           {sim.on ? "Exit Sim" : "Simulate"}

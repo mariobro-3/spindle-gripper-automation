@@ -69,6 +69,41 @@ export interface MachineProfile {
 }
 
 /** Alignment tweaks applied to an imported STEP model in the viewer */
+export interface Vec3 {
+  x: number;
+  y: number;
+  z: number;
+}
+
+/**
+ * Which STEP bodies articulate in the simulation. Body indices are the solid
+ * order inside the STEP file (stable for a given file). Picked by clicking
+ * bodies in the 3D viewer.
+ *
+ * For the flipper: pick the rotating head separately from the grip fingers.
+ * Fingers automatically ride with the head when it flips - you do not need to
+ * add them to the rotating set.
+ *
+ * Jaw open direction is inferred from the picked bodies (along the line between
+ * finger A and finger B, or away from the model center for a single jaw). You
+ * only enter how far they open - rotation / orientation of the whole gripper
+ * does not change that.
+ */
+export interface ModelSimConfig {
+  /** bodies that rotate 180 deg (flipper head); pivot = their combined bounding-box center */
+  rotating: number[];
+  /** rotation axis in model-local coordinates (before alignment rotations) */
+  rotAxis: "x" | "y" | "z";
+  /** moving jaw / finger group A */
+  jawA: number[];
+  /** how far jaw A opens (inches); direction is inferred from geometry */
+  jawATravel: number;
+  /** moving jaw / finger group B (e.g. the opposite gripper finger) */
+  jawB: number[];
+  /** how far jaw B opens (inches); opposite side of the inferred axis from A */
+  jawBTravel: number;
+}
+
 export interface ModelAlignment {
   rotX: number; // degrees
   rotY: number;
@@ -79,6 +114,15 @@ export interface ModelAlignment {
   visible: boolean;
   /** STEP file (relative path in the CAD library); empty = built-in auto-detect */
   file?: string;
+  /** simulation articulation: which bodies move and how */
+  sim?: ModelSimConfig;
+  /**
+   * user-picked datum corner in RAW model coordinates (as imported, before
+   * units scale / rotation). When set, this point lands on the station point
+   * (at plate top) and offX/offY/offZ measure from it. When null/undefined
+   * the model auto-places by bounding-box center / bottom.
+   */
+  datum?: Vec3 | null;
 }
 
 export type ModelKey = "vise" | "flipper" | "gripper" | "jaws1" | "jaws2";

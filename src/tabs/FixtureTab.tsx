@@ -1,11 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { useApp } from "../store";
 import { Viewer } from "../viewer/Viewer";
-import { NumField, Section, SelectField, CheckField } from "../ui";
+import { NumField, ResizablePanel, Section, SelectField, CheckField } from "../ui";
 import { listCadFiles, uploadCadFile } from "../api";
 import { computeOffsets, fmt, g10Lines } from "../logic/offsets";
 import { downloadText } from "../download";
-import type { ModelAlignment, ModelKey, StationKey } from "../types";
+import { defaultModelSim } from "../defaults";
+import type { PickGroup } from "../store";
+import type { ModelAlignment, ModelKey, ModelSimConfig, StationKey } from "../types";
+
+const STATION_SHORT: Record<StationKey, string> = {
+  vise1: "Vise 1",
+  flipper: "Flipper",
+  vise2: "Vise 2",
+  tray: "Stock tray",
+  finished: "Finished",
+};
 
 function OffsetCell({
   value,
@@ -49,6 +59,178 @@ function AlignmentFields({
       <NumField label="Offset X" value={align.offX} step={0.05} unit="in" onChange={(v) => onChange((a) => (a.offX = v))} />
       <NumField label="Offset Y" value={align.offY} step={0.05} unit="in" onChange={(v) => onChange((a) => (a.offY = v))} />
       <NumField label="Offset Z" value={align.offZ} step={0.05} unit="in" onChange={(v) => onChange((a) => (a.offZ = v))} />
+    </>
+  );
+}
+
+const PICK_MODEL_LABEL = { vise: "vise", flipper: "flipper", gripper: "gripper" } as const;
+
+/**
+ * Corner-datum control: click a corner of the model in the viewer and it
+ * becomes the model's datum. The model does NOT move when picking - the
+ * offset fields are rewritten to the corner's current position relative to
+ * the station point, so all further offset edits measure from that corner.
+ * Cleared = automatic bounding-box placement (offsets reset to 0).
+ */
+function DatumField({ model }: { model: "vise" | "flipper" | "gripper" }) {
+  const datum = useApp((s) => s.job.fixture.models[model].datum);
+  const pick = useApp((s) => s.pick);
+  const setPick = useApp((s) => s.setPick);
+  const update = useApp((s) => s.update);
+  const active = pick?.model === model && pick.group === "datum";
+  return (
+    <>
+      <div className="pickrow">
+        <span className="pickrow-label">Datum</span>
+        <span className="pickrow-count">
+          {datum
+            ? `corner (${datum.x.toFixed(2)}, ${datum.y.toFixed(2)}, ${datum.z.toFixed(2)})`
+            : "auto (model center)"}
+        </span>
+        <button
+          className={`btn small ${active ? "primary" : ""}`}
+          onClick={() => setPick(active ? null : { model, group: "datum" })}
+        >
+          {active ? "Cancel" : "Pick corner"}
+        </button>
+        <button
+          className="btn small"
+          disabled={!datum}
+          onClick={() =>
+            update((j) => {
+              const a = j.fixture.models[model];
+              a.datum = null;
+              a.offX = 0;
+              a.offY = 0;
+              a.offZ = 0;
+            })
+          }
+        >
+          Clear
+        </button>
+      </div>
+      <p className="hint">
+        Pick corner, then click where faces meet on the {PICK_MODEL_LABEL[model]} in the viewer (snaps to the
+        nearest corner). The model stays put - the corner becomes the datum, and the offsets above update to
+        show where that corner sits relative to the station point. Edit them to position the model by its
+        corner (0, 0, 0 puts the corner exactly on the station point). Clear returns to automatic centering
+        and zeroes the offsets.
+      </p>
+    </>
+  );
+}
+
+/**
+ * Configure which STEP bodies articulate in the simulation. "Pick" enters a
+ * viewer mode where clicking bodies toggles them in/out of the group.
+ */
+function SimBodiesEditor({ model }: { model: "vise" | "flipper" | "gripper" }) {
+  const align = useApp((s) => s.job.fixture.models[model]);
+  const pick = useApp((s) => s.pick);
+  const setPick = useApp((s) => s.setPick);
+  const update = useApp((s) => s.update);
+  const sim = align.sim;
+
+  // leave pick mode when this editor goes away (section collapsed / tab change)
+  useEffect(
+    () => () => {
+      const p = useApp.getState().pick;
+      if (p?.model === model) useApp.getState().setPick(null);
+    },
+    [model]
+  );
+
+  const ensure = (mut: (s: ModelSimConfig) => void) =>
+    update((j) => {
+      const a = j.fixture.models[model];
+      if (!a.sim) a.sim = defaultModelSim();
+      if (typeof a.sim.jawATravel !== "number") a.sim.jawATravel = defaultModelSim().jawATravel;
+      if (typeof a.sim.jawBTravel !== "number") a.sim.jawBTravel = defaultModelSim().jawBTravel;
+      mut(a.sim);
+    });
+
+  const row = (group: PickGroup, label: string) => {
+    const count = sim?.[group]?.length ?? 0;
+    const active = pick?.model === model && pick.group === group;
+    return (
+      <div className="pickrow">
+        <span className="pickrow-label">{label}</span>
+        <span className="pickrow-count">
+          {count} {count === 1 ? "body" : "bodies"}
+        </span>
+        <button
+          className={`btn small ${active ? "primary" : ""}`}
+          onClick={() => setPick(active ? null : { model, group })}
+        >
+          {active ? "Done" : "Pick"}
+        </button>
+        <button className="btn small" disabled={count === 0} onClick={() => ensure((s) => (s[group] = []))}>
+          Clear
+        </button>
+      </div>
+    );
+  };
+
+  const travel = (field: "jawATravel" | "jawBTravel") => (
+    <NumField
+      label="Open travel"
+      value={sim?.[field] ?? 0.25}
+      step={0.05}
+      min={0}
+      unit="in"
+      title="How far this finger/jaw opens. Direction is inferred from the picked bodies."
+      onChange={(v) => ensure((s) => (s[field] = Math.max(0, v)))}
+    />
+  );
+
+  return (
+    <>
+      <h4 className="subhead">Simulation Bodies</h4>
+      <p className="hint">
+        Click Pick, then click bodies in the 3D viewer (highlighted{" "}
+        {model === "flipper" ? "orange = rotating head, green / purple = grip fingers" : "green / purple"}).
+        {model === "flipper"
+          ? " Pick the rotating head separately from the grip fingers - the fingers automatically flip with the head."
+          : ""}{" "}
+        Open travel is just a distance; the open direction is inferred from the finger geometry so rotating the
+        whole gripper does not change it. Picking bodies never moves the model - the picked jaws only tell the
+        simulation where parts sit.
+      </p>
+      {model === "flipper" && (
+        <>
+          {row("rotating", "Rotating head")}
+          <SelectField
+            label="Rotation axis (model)"
+            value={sim?.rotAxis ?? "x"}
+            options={[
+              { value: "x", label: "Model X" },
+              { value: "y", label: "Model Y" },
+              { value: "z", label: "Model Z" },
+            ]}
+            onChange={(v) => ensure((s) => (s.rotAxis = v))}
+          />
+          {row("jawA", "Grip finger A")}
+          {travel("jawATravel")}
+          {row("jawB", "Grip finger B")}
+          {travel("jawBTravel")}
+        </>
+      )}
+      {model === "vise" && (
+        <>
+          {row("jawA", "Moving jaw")}
+          {travel("jawATravel")}
+          {row("jawB", "Second moving jaw (optional)")}
+          {travel("jawBTravel")}
+        </>
+      )}
+      {model === "gripper" && (
+        <>
+          {row("jawA", "Finger A")}
+          {travel("jawATravel")}
+          {row("jawB", "Finger B")}
+          {travel("jawBTravel")}
+        </>
+      )}
     </>
   );
 }
@@ -119,7 +301,7 @@ export function FixtureTab() {
       <div className="viewer-side">
         <Viewer />
       </div>
-      <div className="panel-side">
+      <ResizablePanel>
         <Section title="Placement on Bed">
           <SelectField
             label="Datum reference point"
@@ -148,32 +330,34 @@ export function FixtureTab() {
             Machine coordinates for every work offset - type them in directly (WCS codes are assigned on the
             Datum &amp; Offsets page).
           </p>
-          <table className="data offset-sheet">
-            <thead>
-              <tr>
-                <th>WCS</th>
-                <th>Station</th>
-                <th>X</th>
-                <th>Y</th>
-                <th>Z</th>
-              </tr>
-            </thead>
-            <tbody>
-              {offsetRows.map((r) => {
-                const set = (axis: "x" | "y" | "z") => (v: number) =>
-                  update((j) => (j.offsets[r.station as StationKey][axis] = v));
-                return (
-                  <tr key={r.station}>
-                    <td className="wcs">{r.wcs}</td>
-                    <td title={r.note}>{r.label}</td>
-                    <td className="num"><OffsetCell value={r.x} onChange={set("x")} /></td>
-                    <td className="num"><OffsetCell value={r.y} onChange={set("y")} /></td>
-                    <td className="num"><OffsetCell value={r.z} onChange={set("z")} /></td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="table-scroll">
+            <table className="data offset-sheet">
+              <thead>
+                <tr>
+                  <th>WCS</th>
+                  <th>Station</th>
+                  <th>X</th>
+                  <th>Y</th>
+                  <th>Z</th>
+                </tr>
+              </thead>
+              <tbody>
+                {offsetRows.map((r) => {
+                  const set = (axis: "x" | "y" | "z") => (v: number) =>
+                    update((j) => (j.offsets[r.station as StationKey][axis] = v));
+                  return (
+                    <tr key={r.station}>
+                      <td className="wcs">{r.wcs}</td>
+                      <td title={`${r.label} - ${r.note}`}>{STATION_SHORT[r.station as StationKey]}</td>
+                      <td className="num"><OffsetCell value={r.x} onChange={set("x")} /></td>
+                      <td className="num"><OffsetCell value={r.y} onChange={set("y")} /></td>
+                      <td className="num"><OffsetCell value={r.z} onChange={set("z")} /></td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
           <div className="btnrow">
             <button className="btn" onClick={() => window.print()}>
               Print offset sheet
@@ -252,6 +436,8 @@ export function FixtureTab() {
         <Section title="Model Alignment - Air Vise" defaultOpen={false}>
           <ModelFileField align={fixture.models.vise} cadFiles={cadFiles} autoLabel="Auto (bundled Gimbel vise)" onChange={modelFile("vise")} />
           <AlignmentFields align={fixture.models.vise} onChange={(mut) => update((j) => mut(j.fixture.models.vise))} />
+          <DatumField model="vise" />
+          <SimBodiesEditor model="vise" />
         </Section>
         <Section title="Soft Jaws - Vise 1" defaultOpen={false}>
           <p className="hint">Optional: your own soft jaw STEP model, shown at the vise 1 station.</p>
@@ -266,13 +452,17 @@ export function FixtureTab() {
         <Section title="Model Alignment - Flipper" defaultOpen={false}>
           <ModelFileField align={fixture.models.flipper} cadFiles={cadFiles} autoLabel="Auto (bundled QuickFlip180)" onChange={modelFile("flipper")} />
           <AlignmentFields align={fixture.models.flipper} onChange={(mut) => update((j) => mut(j.fixture.models.flipper))} />
+          <DatumField model="flipper" />
+          <SimBodiesEditor model="flipper" />
         </Section>
         <Section title="Model Alignment - Gripper" defaultOpen={false}>
           <p className="hint">Shown floating above the flipper for reference only.</p>
           <ModelFileField align={fixture.models.gripper} cadFiles={cadFiles} autoLabel="Auto (bundled TSA gripper)" onChange={modelFile("gripper")} />
           <AlignmentFields align={fixture.models.gripper} onChange={(mut) => update((j) => mut(j.fixture.models.gripper))} />
+          <DatumField model="gripper" />
+          <SimBodiesEditor model="gripper" />
         </Section>
-      </div>
+      </ResizablePanel>
     </div>
   );
 }

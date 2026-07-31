@@ -60,9 +60,13 @@ export function plateToMachine(job: JobConfig, localX: number, localY: number): 
 export function autoOffsets(job: JobConfig): Record<StationKey, StationXYZ> {
   const { fixture, datum, stockTray, finished } = job;
 
-  const v1 = plateToMachine(job, fixture.vise1X, fixture.vise1Y);
-  const v2 = plateToMachine(job, fixture.vise2X, fixture.vise2Y);
-  const fl = plateToMachine(job, fixture.flipperX, fixture.flipperY);
+  const r4 = (p: { x: number; y: number }) => ({
+    x: Math.round(p.x * 10000) / 10000,
+    y: Math.round(p.y * 10000) / 10000,
+  });
+  const v1 = r4(plateToMachine(job, fixture.vise1X, fixture.vise1Y));
+  const v2 = r4(plateToMachine(job, fixture.vise2X, fixture.vise2Y));
+  const fl = r4(plateToMachine(job, fixture.flipperX, fixture.flipperY));
   const finishedPos =
     finished.mode === "bin"
       ? { x: finished.bin.x, y: finished.bin.y }

@@ -15,6 +15,17 @@ function defaultAlignment(): ModelAlignment {
  * Z-up scene: stand them up with rotX 90, then the flipper turns 90 on Z so
  * its nest faces the vises. Rotations apply X, then Y, then Z.
  */
+export function defaultModelSim() {
+  return {
+    rotating: [] as number[],
+    rotAxis: "x" as const,
+    jawA: [] as number[],
+    jawATravel: 0.25,
+    jawB: [] as number[],
+    jawBTravel: 0.25,
+  };
+}
+
 export function defaultModelAlignments() {
   return {
     vise: { ...defaultAlignment(), rotX: 90 },
